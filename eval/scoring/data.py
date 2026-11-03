@@ -116,7 +116,7 @@ def _report_findings(stream: Path) -> list[dict] | None:
 
 
 def review_findings(run: Run) -> list[dict] | None:
-    """A run's findings as {id, member, label, file, line, text}; None when `/code-review`
+    """A run's findings as {id, member, label, group, file, line, text}; None when `/code-review`
     reported no structured findings (then its text reply is scored whole).
 
     `text` is the finding's one-sentence statement: the board's `claim`, `/code-review`'s
@@ -128,16 +128,28 @@ def review_findings(run: Run) -> list[dict] | None:
         if found is None:
             return None
         return [
-            {"id": f"cr-{i + 1}", "member": None, "label": None, "file": f.get("file"), "line": f.get("line"),
+            {"id": f"cr-{i + 1}", "member": None, "label": None, "group": None, "file": f.get("file"), "line": f.get("line"),
              "text": f.get("summary") or f.get("short_summary", "")}
             for i, f in enumerate(found)
         ]
     board = parse_board_output((run.path / "final.json").read_text(encoding="utf-8"))
     return [
-        {"id": f["id"], "member": f["member"], "label": f.get("label"), "file": f.get("file"), "line": f.get("line"),
-         "text": f["claim"]}
+        {"id": f["id"], "member": f["member"], "label": f.get("label"), "group": f.get("group"),
+         "file": f.get("file"), "line": f.get("line"), "text": f["claim"]}
         for f in board["findings"]
     ]
+
+
+def representatives(findings: list[dict]) -> list[dict]:
+    """One finding per board group: the first, as the board's report shows one item per group.
+    Findings without a group (`/code-review`) each stand alone."""
+    seen, out = set(), []
+    for f in findings:
+        key = f.get("group") or f["id"]
+        if key not in seen:
+            seen.add(key)
+            out.append(f)
+    return out
 
 
 def render_finding(f: dict) -> str:

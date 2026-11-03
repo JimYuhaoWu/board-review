@@ -83,6 +83,7 @@ class JudgeModel:
     """One judge model on an OpenAI-compatible endpoint: extraction, dedup, and judging."""
 
     def __init__(self, model: str, concurrency: int = 1, rate: float = 10.0, max_wait: float = 3 * 3600,
+                 call_timeout: float = 180,
                  cache: Cache | None = None, log=print):
         """`rate` is the most calls started per minute; `max_wait` is the longest total pause, in
         seconds, before giving up on a busy or unreachable endpoint."""
@@ -104,6 +105,10 @@ class JudgeModel:
         self.calls = 0
         self.interval = 60.0 / rate
         self.max_wait = max_wait
+        # Martian waits 30 s for a dedup or judge answer. The shared endpoint can be slower for long
+        # prompts (dedup of a board's ~30 candidates timed out every time), so allow 3 minutes.
+        # This is the client's patience, not the method: prompts and parsing are unchanged.
+        m25.LLM_CALL_TIMEOUT = m3.LLM_CALL_TIMEOUT = call_timeout
         self.backoff_base = 60.0
         self.log = log
         self._lock = asyncio.Lock()

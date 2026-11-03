@@ -19,7 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .data import RESULTS, Run, parse_board_output, render_finding, review_findings
+from .data import RESULTS, Run, parse_board_output, render_finding, representatives, review_findings
 from .llm import JudgeModel
 
 SCHEMA_VERSION = 1
@@ -49,7 +49,7 @@ async def _candidates(run: Run, findings: list[dict] | None, jm: JudgeModel, who
     if findings is None:  # `/code-review` without structured findings: its reply, whole
         return bare(await jm.extract((run.path / "final.md").read_text(encoding="utf-8")))
     if whole:
-        kept = [f for f in findings if f["label"] in (None, "CONFIRMED", "PLAUSIBLE")]
+        kept = representatives([f for f in findings if f["label"] in (None, "CONFIRMED", "PLAUSIBLE")])
         return bare(await jm.extract("\n\n---\n\n".join(render_finding(f) for f in kept)))  # Martian's separator
 
     issues = await asyncio.gather(*(jm.extract(render_finding(f)) for f in findings))
@@ -101,7 +101,7 @@ async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = 
         "run_meta": run.meta,
     }
     if findings is not None:
-        record["findings"] = [{k: f[k] for k in ("id", "member", "label", "file", "line", "text")} for f in findings]
+        record["findings"] = [{k: f[k] for k in ("id", "member", "label", "group", "file", "line", "text")} for f in findings]
     if run.variant == "board-full":
         record["members"] = parse_board_output((run.path / "final.json").read_text(encoding="utf-8")).get("members", {})
     out.parent.mkdir(parents=True, exist_ok=True)
