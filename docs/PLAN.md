@@ -92,8 +92,10 @@ How the user picks members:
     - **Backup, paid:** Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, the judges of the published results, through a multi-model provider such as OpenRouter. About $50–100. Used if a local judge fails Gate 1b and no other local model can replace it, if the local endpoint becomes unavailable, or if leaderboard-comparable scores are needed.
   - **Rules for the local endpoint.**
     - Log the served model version with every judge call. The models change without notice, so judge each comparison within one short window, and re-judge everything if the version changes.
-    - No quotas are published, and the endpoint is shared. Keep concurrency low and back off on errors.
-    - Key test (2026-11-03): all 3 models answered a judge-style prompt with valid JSON, with `temperature: 0` accepted, in 0.7–2.5 s. The response reports only the alias (`deepseek-flash`, `glm-flash`, `Qwen`), not the version, so the harness records the version from the provider's model list at each judging session. Whether temperature 0 gives repeatable verdicts is checked in Gate 1b by judging the same pairs twice.
+    - **The endpoint has a request quota.** None is published, but on 2026-11-03 the key was cut to "at most 1 request per 70 minutes, including failed requests" (HTTP 429). That day it had served three smoke-test review runs through Claude Code, plus about 340 judge calls. The size of the quota and its reset window are unknown; ask the HPC administrators. Until they are known, the 9,500–26,000 judge calls may not fit, and the paid backup panel may be needed for part of them.
+    - **Use the key for judging only.** Don't run Claude Code review runs on it (smoke tests included), because they use up the same quota.
+    - The endpoint is shared. Keep concurrency low, and stop on a 429 instead of retrying, because failed requests count too.
+    - Key test (2026-11-03): all 3 models answered a judge-style prompt with valid JSON, with `temperature: 0` accepted, in 0.7–2.5 s. The response reports only the alias (`deepseek-flash`, `glm-flash`, `Qwen`), not the version, and the provider's model list carries no version either (every model shows the same fixed `created` date). The harness logs the list entry at each judging session, but it can't reveal a silent model update; J3 adds a drift check that re-judges a fixed sample of pairs at each session. Whether temperature 0 gives repeatable verdicts is checked in Gate 1b by judging the same pairs twice.
 
 ### Phase 0: setup
 
@@ -124,7 +126,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
    - A run that stops at a usage limit is marked `failed: usage-limit`, never recorded as an empty review.
    - The runner stops for that account and resumes after the reset.
    - Findings are cached per member, so a resumed run only re-runs the members that didn't finish.
-5. **Score every variant the same way.** Each review is rendered as one general comment and goes through Martian's own extraction, dedup, and judge steps, unmodified. The board's structured JSON gets no advantage over `/code-review`'s text.
+5. **Score every variant the same way.** Both variants report structured findings (the board's JSON; `/code-review`'s `ReportFindings` call). Each finding is rendered as its location plus its one-sentence statement and goes through Martian's own extraction, dedup, and judge steps, unmodified. Extraction runs one finding at a time, so findings keep their member and label for subset scoring. Martian extracts a tool's whole review at once, so that mode is scored too, as a check. Details in `eval/scoring/README.md`.
 6. **Score board runs three ways:** CONFIRMED only, CONFIRMED + PLAUSIBLE, and the raw union before adjudication.
 7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2; only approximate if the account is used for other work at the same time), and the run metadata in section 6.4.
 
@@ -381,6 +383,7 @@ board-review/
 - **Variable intent text:** the intent auditor depends on PR descriptions, and their quality varies.
 - **Few repeats:** 2 repeats make each comparison noisier, so only larger differences will be clear.
 - **Offline variant b keeps c's labels (Yara, review of PR #8).** Grouping and adjudication run over all members' findings. In a real b run, groups would be smaller, a group's severity could drop below the bar for a second verifier, and verifiers would see fewer co-findings. So offline b is exact for the raw union but only approximate for CONFIRMED and PLAUSIBLE. Phase 4 checks the size of this effect with real b runs on the development PRs.
+- **`/code-review` reports at most 32 findings,** even with `--max-findings all`: that is its `ReportFindings` tool's limit. Martian PRs have far fewer golden comments, so the cap should rarely matter.
 
 ## References
 
