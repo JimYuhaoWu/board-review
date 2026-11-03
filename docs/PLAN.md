@@ -92,9 +92,10 @@ How the user picks members:
     - **Backup, paid:** Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, the judges of the published results, through a multi-model provider such as OpenRouter. About $50–100. Used if a local judge fails Gate 1b and no other local model can replace it, if the local endpoint becomes unavailable, or if leaderboard-comparable scores are needed.
   - **Rules for the local endpoint.**
     - Log the served model version with every judge call. The models change without notice, so judge each comparison within one short window, and re-judge everything if the version changes.
-    - **The endpoint has a request quota.** None is published, but on 2026-11-03 the key was cut to "at most 1 request per 70 minutes, including failed requests" (HTTP 429). That day it had served three smoke-test review runs through Claude Code, plus about 340 judge calls. The size of the quota and its reset window are unknown; ask the HPC administrators. Until they are known, the 9,500–26,000 judge calls may not fit, and the paid backup panel may be needed for part of them.
-    - **Use the key for judging only.** Don't run Claude Code review runs on it (smoke tests included), because they use up the same quota.
-    - The endpoint is shared. Keep concurrency low, and stop on a 429 instead of retrying, because failed requests count too.
+    - **No hard quota, but the cluster throttles a long queue.** On 2026-11-03 the key got HTTP 429 ("at most 1 request per 70 minutes") after three smoke-test review runs through Claude Code and about 340 judge calls in one evening. The HPC administrators confirmed there is no hard quota: the cluster slows requests down when too many are queued, and they suggest running at a low rate or when few people are using it.
+    - **So judging runs slowly, preferably at night.** The harness starts at most 10 calls a minute, one at a time by default (`--rate`, `--concurrency`). After a 429 or a lost connection, it pauses (1 minute, doubling to at most 15) and repeats the call, and it stops cleanly after 3 hours without success (`--max-wait`). Every finished call is cached, so a stopped session resumes where it left off. Account A connects through a VPN, which can drop; if that happens often, judging moves to a machine on the campus network.
+    - **Review runs through Claude Code** (smoke tests on the local models) make many calls quickly. Run them only at quiet times, never alongside judging.
+    - **Time, not money, is the cost.** About 10,000 calls per judge for the full run set (rough estimate) is about 17 hours at 10 calls a minute, so a few nights per judge.
     - Key test (2026-11-03): all 3 models answered a judge-style prompt with valid JSON, with `temperature: 0` accepted, in 0.7–2.5 s. The response reports only the alias (`deepseek-flash`, `glm-flash`, `Qwen`), not the version, and the provider's model list carries no version either (every model shows the same fixed `created` date). The harness logs the list entry at each judging session, but it can't reveal a silent model update; J3 adds a drift check that re-judges a fixed sample of pairs at each session. Whether temperature 0 gives repeatable verdicts is checked in Gate 1b by judging the same pairs twice.
 
 ### Phase 0: setup
@@ -127,7 +128,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
    - A run that stops at a usage limit is marked `failed: usage-limit`, never recorded as an empty review.
    - The runner stops for that account and resumes after the reset.
    - A board run is one `claude -p` call, so a resumed run re-runs the whole (variant, PR, repeat). Running the same command again skips finished runs.
-5. **Score every variant the same way.** Both variants report structured findings (the board's JSON; `/code-review`'s `ReportFindings` call). Each finding is rendered as its location plus its one-sentence statement and goes through Martian's own extraction, dedup, and judge steps, unmodified. Extraction runs one finding at a time, so findings keep their member and label for subset scoring. Martian extracts a tool's whole review at once, so that mode is scored too, as a check. Details in `eval/scoring/README.md`.
+5. **Score every variant the same way.** Both variants report structured findings (the board's JSON; `/code-review`'s `ReportFindings` call). Each finding is rendered as its location plus its one-sentence statement and is one candidate, so findings keep their member and label for subset scoring. The board counts once per group of duplicates, as its report shows it. Martian's dedup and judge steps run unmodified. Martian's extraction step is skipped for structured findings, which are one issue each: on the smoke repo, extracting them one at a time split compound sentences into extra false positives. Martian's own whole-review extraction is scored too, as a check. Details in `eval/scoring/README.md`.
 6. **Score board runs three ways:** CONFIRMED only, CONFIRMED + PLAUSIBLE, and the raw union before adjudication.
 7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2; only approximate if the account is used for other work at the same time), and the run metadata in section 6.4.
 
@@ -140,7 +141,14 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 **Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
 
 - **Gate 1, judge sanity:** re-judge the stored `claude-code` row with one of the published judges, and compare the result with that judge's published score. This checks our copy of the judge pipeline. It needs about 700 judge calls (50 reviews × ~14 pairs), a few dollars on a paid API.
+  - **Judge:** Claude Sonnet 4.5 through OpenRouter (`openrouter:anthropic/claude-sonnet-4.5`, snapshot 2025-09-29, the same as Martian's), about $2.
+  - **Pass rule:** for at least 90% of golden comments, found / not found agrees with Martian's published Sonnet 4.5 verdicts on the same reviews (Martian's three judges agree with each other on 95%), and F1 (Core) is within 3 points of the published 38.7%.
+  - Command: `uv run python -m eval.scoring gate1 --judge openrouter:anthropic/claude-sonnet-4.5 --martian-dir <Martian clone>/offline`.
 - **Gate 1b, local-judge agreement** (free; judge calls only, no review runs): each local judge re-judges the stored rows of several published tools. Its ranking of those tools must agree closely with the published rankings. A local judge that fails isn't used.
+  - **Tools:** 7 that span the published range: cubic-v2, augment, devin, macroscope, claude-code, codeant-v2, kg. That is all 50 PRs each, about 4,700 calls per judge, or one night at 10 calls a minute.
+  - **Pass rule:** the local judge's mean Kendall τ (F1 ranking, Core profile) with the three published judges is at least the lowest τ between two published judges.
+  - **Repeat check:** 200 of the judge's cached prompts are asked again. The agreement rate shows how repeatable temperature 0 is, and becomes the baseline for the drift check at later sessions.
+  - Command: `uv run python -m eval.scoring gate1b --judge <model> --martian-dir <Martian clone>/offline`; the report goes to `eval/reports/gate1b-<model>.md`.
 - **Gate 2, early stop:** the full board must score a higher F1 than `/code-review` on the pilot PRs, using the development judge, Martian's Core profile, and board findings labeled CONFIRMED or PLAUSIBLE. If it doesn't, stop and rethink the design before spending more usage.
 
 ### Phase 4: full runs, select the default board
@@ -368,6 +376,7 @@ board-review/
 - Final judge panel: the 3 local models (free). The paid published judges are the backup (5.1).
 - Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
 - Intent: both variants get the PR title and description (5.1), with "neither" as the fallback.
+- Gate 1's paid judge: Claude Sonnet 4.5 through OpenRouter, with the pass rule in Phase 3.
 - Pinned Claude Code version: 2.1.317 on both machines.
 - Dataset: all 45 runnable Martian PRs, split 15 development / 30 test with seed 20261103, frozen in `split.json` (Yara, 2026-11-03).
 
@@ -375,7 +384,7 @@ board-review/
 
 **Open:**
 
-1. **Gate 1's paid judge:** which published judge and provider to use for the one-off check (a few dollars).
+None at the moment.
 
 ## 11. Known limits
 

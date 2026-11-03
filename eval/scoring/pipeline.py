@@ -8,10 +8,10 @@ is scored offline from it without new judge calls (PLAN 6.2):
 - verdicts: the judge's answer for every (golden comment, candidate) pair.
 
 Both variants report structured findings (the board's JSON, `/code-review`'s ReportFindings
-call). Each finding is extracted on its own, so every candidate keeps its member and label.
-Mode `whole` instead extracts all findings as one comment, the way Martian treats a tool's
-review, to check that per-finding extraction doesn't change the scores. Whole-mode board
-records keep only CONFIRMED + PLAUSIBLE findings.
+call). Each finding is one candidate, rendered as its location and statement, so every
+candidate keeps its member and label. Mode `whole` instead runs Martian's extraction on the
+whole report (one item per board group, CONFIRMED + PLAUSIBLE), the way Martian treats a
+tool's review, as a check.
 """
 
 import asyncio
@@ -19,7 +19,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .data import RESULTS, Run, parse_board_output, render_finding, review_findings
+from .data import RESULTS, Run, parse_board_output, render_finding, representatives, review_findings
 from .llm import JudgeModel
 
 SCHEMA_VERSION = 1
@@ -27,7 +27,7 @@ WHOLE = "@whole"  # suffix for records of a variant extracted as one comment
 
 
 def judge_slug(model: str) -> str:
-    return model.strip().replace("/", "_")
+    return model.strip().replace("/", "_").replace(":", "_")
 
 
 def record_path(dataset: str, judge: str, variant: str, pr_id: str, repeat: int) -> Path:
@@ -49,15 +49,15 @@ async def _candidates(run: Run, findings: list[dict] | None, jm: JudgeModel, who
     if findings is None:  # `/code-review` without structured findings: its reply, whole
         return bare(await jm.extract((run.path / "final.md").read_text(encoding="utf-8")))
     if whole:
-        kept = [f for f in findings if f["label"] in (None, "CONFIRMED", "PLAUSIBLE")]
+        kept = representatives([f for f in findings if f["label"] in (None, "CONFIRMED", "PLAUSIBLE")])
         return bare(await jm.extract("\n\n---\n\n".join(render_finding(f) for f in kept)))  # Martian's separator
 
-    issues = await asyncio.gather(*(jm.extract(render_finding(f)) for f in findings))
-    return [
-        {"text": t, "finding": f["id"], "member": f["member"], "label": f["label"]}
-        for f, texts in zip(findings, issues, strict=True)
-        for t in texts
-    ]
+    # Each structured finding is one issue already, so it is one candidate as it stands. Extracting
+    # findings one at a time split compound sentences into several candidates (smoke test: one
+    # "four behaviors are untested" finding became five), while extracting the whole report kept
+    # one candidate per item. Martian too scores raw comments when nothing was extracted.
+    return [{"text": render_finding(f), "finding": f["id"], "member": f["member"], "label": f["label"]}
+            for f in findings]
 
 
 async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = False, force: bool = False) -> Path:
@@ -101,7 +101,7 @@ async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = 
         "run_meta": run.meta,
     }
     if findings is not None:
-        record["findings"] = [{k: f[k] for k in ("id", "member", "label", "file", "line", "text")} for f in findings]
+        record["findings"] = [{k: f[k] for k in ("id", "member", "label", "group", "file", "line", "text")} for f in findings]
     if run.variant == "board-full":
         record["members"] = parse_board_output((run.path / "final.json").read_text(encoding="utf-8")).get("members", {})
     out.parent.mkdir(parents=True, exist_ok=True)
