@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "board-review/schema.json",
+  "title": "Board review output schemas",
+  "$defs": {
+    "severity": {
+      "enum": ["Critical", "High", "Medium", "Low"],
+      "description": "Critical: data loss, security breach, or outage. High: wrong behavior on a realistic path. Medium: wrong behavior on an uncommon path, or a real maintainability hazard. Low: minor."
+    },
+    "category": {
+      "enum": ["bug", "security", "concurrency", "data", "api", "perf", "test_gap", "doc_defect", "style"],
+      "description": "Matches the Martian Code Review Bench categories, without 'speculative'."
+    },
+    "label": { "enum": ["CONFIRMED", "PLAUSIBLE", "REFUTED"] },
+
+    "finding": {
+      "type": "object",
+      "required": ["file", "line", "claim", "evidence", "severity", "category", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "description": "Path relative to the repository root." },
+        "line": { "type": "integer", "minimum": 1, "description": "Line in the head version." },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "claim": { "type": "string", "description": "One sentence: what goes wrong." },
+        "evidence": { "type": "string", "description": "The trace from trigger to wrong outcome, with file:line citations. Say 'inference:' before any step you did not see in the code." },
+        "severity": { "$ref": "#/$defs/severity" },
+        "category": { "$ref": "#/$defs/category" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fix_hint": { "type": "string", "description": "Optional. One sentence." }
+      }
+    },
+
+    "board_finding": {
+      "type": "object",
+      "description": "A member's finding as it appears in the final report: the 'finding' fields plus id, member, group, and label.",
+      "required": ["id", "member", "group", "label", "file", "line", "claim", "evidence", "severity", "category", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "<member>-<n>" },
+        "member": { "type": "string" },
+        "group": { "type": "string" },
+        "label": { "$ref": "#/$defs/label" },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "claim": { "type": "string" },
+        "evidence": { "type": "string" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "category": { "$ref": "#/$defs/category" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fix_hint": { "type": "string" }
+      }
+    },
+
+    "member_output": {
+      "type": "object",
+      "required": ["member", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "member": { "type": "string" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+        "explanations": {
+          "type": "array",
+          "description": "Intern only: plain-language account of each changed unit.",
+          "items": {
+            "type": "object",
+            "required": ["file", "unit", "what_it_does"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string" },
+              "unit": { "type": "string", "description": "Function, class, or block name." },
+              "what_it_does": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "string", "description": "Optional. Coverage limits, such as files you could not read." }
+      }
+    },
+
+    "verifier_output": {
+      "type": "object",
+      "required": ["verdicts"],
+      "additionalProperties": false,
+      "properties": {
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["group", "label", "reason", "evidence"],
+            "additionalProperties": false,
+            "properties": {
+              "group": { "type": "string" },
+              "label": { "$ref": "#/$defs/label" },
+              "reason": { "type": "string", "description": "One sentence." },
+              "evidence": { "type": "string", "description": "What you checked, with file:line citations or command output." }
+            }
+          }
+        }
+      }
+    },
+
+    "board_output": {
+      "type": "object",
+      "required": ["schema_version", "target", "intent", "members", "groups", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "const": 1 },
+        "target": {
+          "type": "object",
+          "required": ["base", "head", "diff_command", "files_changed"],
+          "additionalProperties": false,
+          "properties": {
+            "base": { "type": "string" },
+            "head": { "type": "string" },
+            "diff_command": { "type": "string" },
+            "files_changed": { "type": "integer" },
+            "excluded_files": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "intent": { "type": "string" },
+        "members": {
+          "type": "object",
+          "required": ["ran", "skipped", "failed"],
+          "additionalProperties": false,
+          "properties": {
+            "roster": { "type": "string", "description": "default, full, or custom" },
+            "ran": { "type": "array", "items": { "type": "string" } },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object", "required": ["id", "reason"], "additionalProperties": false,
+                "properties": { "id": { "type": "string" }, "reason": { "type": "string" } }
+              }
+            },
+            "failed": {
+              "type": "array",
+              "items": {
+                "type": "object", "required": ["id", "reason"], "additionalProperties": false,
+                "properties": { "id": { "type": "string" }, "reason": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "severity", "finding_ids", "verdicts"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "$ref": "#/$defs/label" },
+              "severity": { "$ref": "#/$defs/severity" },
+              "finding_ids": { "type": "array", "items": { "type": "string" } },
+              "verdicts": {
+                "type": "array",
+                "description": "One entry per verifier pass, in order.",
+                "items": {
+                  "type": "object",
+                  "required": ["label", "reason", "evidence"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": { "$ref": "#/$defs/label" },
+                    "reason": { "type": "string" },
+                    "evidence": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/board_finding" } },
+        "explanations": { "$ref": "#/$defs/member_output/properties/explanations" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

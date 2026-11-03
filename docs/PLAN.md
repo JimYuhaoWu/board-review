@@ -48,18 +48,26 @@ Domain members, such as a member for bioinformatics pipelines, can't be measured
 
 ## 4. Skill layout
 
+The skill ships as a plugin named `board-review`, so benchmark runs can load it with `--plugin-dir` (Phase 0). The command is `/board-review:review`.
+
 ```
-skill/board-review/
-  SKILL.md          orchestrator: scope → roster → dispatch → dedupe → adjudicate → report
-  members/<id>.md   one file per member (section 6.1)
-  adjudicator.md    evidence rules for CONFIRMED / PLAUSIBLE / REFUTED
-  roster.json       named rosters: "default", "full"; Phase 3 fills in "default"
-  schema.json       finding = {member, file, line, claim, evidence, severity, category}
+plugin/
+  .claude-plugin/plugin.json
+  agents/
+    board-member.md        the contract every member follows; tools limited to Read, Grep, Glob, Bash
+    board-verifier.md      evidence rules for CONFIRMED / PLAUSIBLE / REFUTED
+  skills/review/
+    SKILL.md               orchestrator: scope → intent → roster → dispatch → group → adjudicate → report
+    members/<id>.md        one brief per member (section 6.1)
+    roster.json            named rosters: "default", "full"; Phase 4 fills in "default"
+    schema.json            member, verifier, and final output schemas
 ```
+
+Members run as the plugin agent `board-review:board-member`, and verifiers as `board-review:board-verifier`. Neither can edit files, even in an interactive session.
 
 How the user picks members:
 
-- `/board-review --members default|full|intent,edge,...` picks them on the command line.
+- `/board-review:review --members default|full|intent,edge,...` picks them on the command line.
 - With no argument in an interactive session, the skill shows a multi-select list with the default members pre-ticked.
 - Benchmark runs always pass the argument.
 
@@ -71,7 +79,7 @@ How the user picks members:
 - **Reviewer model: Claude Sonnet 5.5 at `medium` effort, for every variant.** Sonnet 5.5 runs on both accounts within plan limits, while Fable runs on usage credits on both (section 7). In the ironbee raw-model results, Sonnet 5.5 tied for the top group at about half of Opus 5.5's cost. Higher effort did not raise Claude review scores there.
 - **Variants:**
   - **a:** built-in `/code-review medium --max-findings all <base>..<head>`.
-  - **c:** full board, `/board-review --members full <base>..<head>`.
+  - **c:** full board, `/board-review:review --members full --format json <base>..<head>`.
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
 - **Judge:** Martian's extraction, dedup, and judge steps, unchanged. Judge models are called through an OpenAI-compatible endpoint, outside both plans.
   - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on a paid API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
@@ -90,7 +98,7 @@ How the user picks members:
 
 - **One pinned Claude Code version on both machines: 2.1.317.** It must be 2.1.288 or later, which `--max-findings` needs. Install it as a standalone CLI with `claude install <version>`, log it in to the account's plan, and set `DISABLE_AUTOUPDATER=1`. Don't run benchmarks with the copy bundled in the desktop app: it updates with the app and isn't logged in when run on its own.
 - **A clean Claude Code setup for benchmark runs**, the same on both machines. A personal setup (user CLAUDE.md, auto-memory, hooks, MCP servers, plugins, skills) changes what the reviewer writes and adds usage to every run. Tested on 2.1.309:
-  - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill must be packaged as a plugin, and it then shows up as `<plugin>:board-review`.
+  - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill is packaged as a plugin, and it shows up as `/board-review:review` (section 4).
   - `--safe-mode` doesn't work: it hides skills loaded through `--plugin-dir`.
   - `--bare` doesn't work: it accepts only an API key, not a plan login.
 - A judge API key for an OpenAI-compatible endpoint, such as the Martian gateway or OpenRouter. It stays in a local `.env` and is never committed.
@@ -157,6 +165,24 @@ Then score every subset of members offline (section 6.2).
 
 Both collaborators sign off on the selected default board before anyone scores the test PRs.
 
+### Phase 4b (optional): stronger models for selected roles
+
+Owner: Yara. Uses **development PRs only**, so the test PRs stay untouched.
+
+The main comparison keeps every role on Sonnet 5.5, so a win can't come from a stronger model. This optional experiment asks whether a stronger model **in one role** is worth its usage.
+
+- **Variants**, each treated as a separate member variant with its own cache key (6.2):
+  - **The verifier on Opus 5.5.** The verifier sets the labels, and wrongful refutation is the costliest error, so it is the first candidate. It needs adjudication-only runs over the cached findings, with no member re-runs.
+  - **The 1–2 members with the most unique true positives** in Phase 4, on Opus 5.5, for example `edge@opus`. Each runs alone.
+- **Not tested:** Fable models, which cost usage credits on both accounts.
+- **Rule:** a variant replaces the Sonnet version only if:
+  - for a member: development F1 improves by more than one bootstrap standard error;
+  - for the verifier: the wrongful refutation rate falls, with CONFIRMED precision not lower;
+  - and the extra usage fits the ceiling in section 7.
+- **Timing:** finish before Phase 5 if the result may change the default board. Otherwise it can run after Phase 5 as a follow-up.
+- **Reporting:** if Phase 5 uses an adopted variant, also report b with every role on Sonnet, so the effect of the design and the effect of the model stay separate.
+- **Skill support needed:** an optional `model:` field in a member brief, and a `--verifier-model` flag. The orchestrator passes them to the Agent tool's `model` parameter.
+
 ### Phase 5: final comparison
 
 - **Variants:** a (`/code-review`) vs. b (default board, computed offline) vs. c (full board), on the test PRs.
@@ -181,6 +207,7 @@ About 25 test PRs means only large differences will be significant. A secondary 
 | **Total** | **~160**, plus judge calls |
 | Minimum option: 1 repeat only | ~80 |
 | Optional: third repeat on test PRs | +50 |
+| Optional Phase 4b: 1–2 members × ~15 development PRs × 2 repeats, plus adjudication-only verifier runs | ~30–60 single-member runs, ~30 adjudication runs |
 
 The earlier draft needed about 305 runs. The savings come from three changes: variant b computed offline, one run set shared by development and test PRs, and pilot and measurement runs reused.
 
@@ -305,7 +332,8 @@ If ~160 runs don't fit within about 3 weekly resets under that ceiling, fall bac
 ```
 board-review/
   docs/PLAN.md                 this file
-  skill/board-review/          the skill (section 4)
+  plugin/                      the board-review plugin (section 4)
+  eval/smoke/                  planted-bug repository for mechanics checks
   eval/
     datasets/<name>/           shared dataset format (section 6.3)
     runner/                    worktrees, claude -p runs, caching, usage-limit handling
@@ -334,10 +362,11 @@ board-review/
 - Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
 - Pinned Claude Code version: 2.1.317 on both machines.
 
+- Work split: see [TASKS.md](TASKS.md). Account A's side builds the skill, scoring, and judge gates. Yara builds the data pipeline, the split, and the runner, and owns the optional Phase 4b.
+
 **Open:**
 
-1. **Who builds which part** of Phases 1 and 2.
-2. **Gate 1's paid judge:** which published judge and provider to use for the one-off check (a few dollars).
+1. **Gate 1's paid judge:** which published judge and provider to use for the one-off check (a few dollars).
 
 ## 11. Known limits
 
