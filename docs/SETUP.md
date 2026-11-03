@@ -2,14 +2,24 @@
 
 Each collaborator completes this checklist on their own machine. Then tick your column in the status table at the bottom, in a pull request.
 
-## 1. Claude Code 2.1.288 or later
+## 1. One pinned Claude Code version, with a clean setup
+
+See PLAN Phase 0 for the reasons. Both machines must run the **same version**, 2.1.288 or later, from Phase 2 until Phase 5 is done. The version is agreed in PLAN section 10.
 
 ```bash
-claude update
+claude install <version>     # standalone CLI, not the desktop app's bundled copy
 claude --version
 ```
 
-Both machines must run the **same version** during the measured runs (Phases 3–5). Agree on the version before Phase 3, then stop updating until Phase 5 is done.
+- Set `DISABLE_AUTOUPDATER=1` in the environment of the shell that runs the benchmark, so the version stays pinned.
+- Benchmark runs use a dedicated, empty config directory. Log in to the plan there once:
+
+  ```bash
+  export CLAUDE_CONFIG_DIR="$HOME/.claude-bench"
+  claude          # log in, then exit
+  ```
+
+  The harness loads the board-review skill with `--plugin-dir`. Your own skills, memory, hooks, and MCP servers stay out of the runs.
 
 ## 2. Never set `ANTHROPIC_API_KEY` in the shell that runs the benchmark
 
@@ -78,8 +88,15 @@ The variables keep the `MARTIAN_` prefix because the benchmark's own scripts rea
 | Martian gateway | `https://api.withmartian.com/v1` | Many models with one key | The benchmark's default. Supports the full 3-judge panel. |
 | Anthropic, OpenAI compatibility | `https://api.anthropic.com/v1/` | Claude only | Uses an Anthropic Console API key. No GPT judge, so it can't run the full panel alone. |
 | OpenAI | `https://api.openai.com/v1` | GPT only | No Claude judge, so it can't run the full panel alone. |
+| DeepSeek | `https://api.deepseek.com` | DeepSeek only (e.g. `deepseek-flash`, `deepseek-v4-pro`) | Cheap, but not needed while the local endpoint is available. |
+| Institutional local endpoint (account A only) | in account A's local `.env` | `deepseek-flash`, `glm-flash`, `Qwen` | Free, reachable only from the institution's network, personal key. Runs the development judge and, under final-panel option 1, the whole panel. |
 
-Recommendation: **one OpenRouter key**, because one key covers the whole judge panel (Claude Opus 4.5, Claude Sonnet 4.5, GPT-5.2). Check the provider's model list for the exact model ids before the first run.
+Who needs what:
+
+- **Account A:** the local endpoint key, for all judging. A paid key only for Gate 1 (a few dollars), and for the final panel if option 2 is chosen (PLAN section 10).
+- **Account B:** no judge key. Account B only runs reviews.
+
+Check the provider's model list for the exact model ids before the first run.
 
 If you use an Anthropic Console key for the judge, store it only as `MARTIAN_API_KEY` in `.env`, never as `ANTHROPIC_API_KEY` (see step 2).
 
@@ -87,7 +104,14 @@ Judge cost is measured in the pilot. Set a spending limit at the provider before
 
 ## 6. Permission to run the benchmark pipeline
 
-Claude Code's auto mode can block running code from an external repository. Before Phase 2, allow the benchmark's Python steps, for example with a project permission rule for `uv run python -m code_review_benchmark.*`. Ask Claude Code to add the rule with the `update-config` skill, or approve each run when prompted.
+Claude Code's auto mode can block running code from an external repository. The repo's `.claude/settings.json` already allows exactly these commands, so nothing is needed on either machine:
+
+- `uv sync`: installs the benchmark's Python dependencies.
+- `uv run python -m code_review_benchmark.*`: runs the benchmark's pipeline steps.
+
+Any other command still asks for approval. Claude Code applies project settings only after you trust the folder.
+
+After installing uv with winget, open a new terminal so `uv` is on `PATH`.
 
 ## 7. Benchmark source
 
@@ -97,9 +121,9 @@ The Martian benchmark is pinned in [`eval/datasets/martian/SOURCE.md`](../eval/d
 
 | Step | Account A (Pro) | Account B (Team Standard) |
 |---|---|---|
-| 1. Claude Code ≥ 2.1.288 | ✅ 2.1.317 | ☐ |
+| 1. Pinned version, clean setup | 2.1.317 installed; pin and clean config dir ☐ | ☐ |
 | 2. `ANTHROPIC_API_KEY` not set | ✅ | ☐ |
-| 3. Python ≥ 3.11 and uv | Python 3.14.5 ✅, uv ☐ | ☐ |
+| 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ☐ |
 | 4. Git line endings | handled by the harness | handled by the harness |
-| 5. Judge key in `.env` | ☐ | ☐ (only if this account runs the judge) |
-| 6. Pipeline permission | ☐ | ☐ |
+| 5. Judge key in `.env` | ☐ (local endpoint key) | not needed |
+| 6. Pipeline permission | ✅ (project rule, shared) | ✅ (comes with the repo) |

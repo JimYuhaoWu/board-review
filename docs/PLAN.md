@@ -73,9 +73,18 @@ How the user picks members:
   - **a:** built-in `/code-review medium --max-findings all <base>..<head>`.
   - **c:** full board, `/board-review --members full <base>..<head>`.
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
-- **Judge:** one judge model during development. A panel of 3 (Claude Opus 4.5, Claude Sonnet 4.5, GPT-5.2, 2 of 3 must agree) for the final numbers only. Judge calls are billed by API, outside both plans.
-  - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on the API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
-  - **Judge choice moves scores.** Martian's three judges agree on 95% of golden comments (Cohen's κ ≈ 0.90), yet Claude Code's published F1 ranges from 39% (Sonnet 4.5) to 49% (Opus 4.5). Gate 1 compares against the published score of the same judge.
+- **Judge:** Martian's extraction, dedup, and judge steps, unchanged. Judge models are called through an OpenAI-compatible endpoint, outside both plans.
+  - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on a paid API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
+  - **Judge choice moves scores.** Martian's three judges agree on 95% of golden comments (Cohen's κ ≈ 0.90), yet Claude Code's published F1 ranges from 39% (Sonnet 4.5) to 49% (Opus 4.5). Scores are only ever compared under the same judge.
+  - **Free local endpoint.** Account A has free access to an institutional OpenAI-compatible endpoint, reachable from the institution's network. It serves DeepSeek V4.1 Flash (`deepseek-flash`), GLM 5.3 Flash (`glm-flash`), and Qwen 3.8 Flash-Next (`Qwen`). The address and key stay in account A's local `.env`. The key is personal, so all judging runs on account A's machine.
+  - **Development judge:** `deepseek-flash` on the local endpoint, if it passes Gate 1b. A non-Claude judge also avoids Claude grading Claude.
+  - **Final panel** (open decision, section 10). 3 judges from different model families; 2 of 3 must agree.
+    - Option 1, free: the 3 local models (DeepSeek, GLM, Qwen). Valid for comparing a, b, and c. The scores can't be compared with the published leaderboard.
+    - Option 2, paid: Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, the judges of the published results, through a multi-model provider such as OpenRouter. About $50–100. The scores can be compared with the leaderboard.
+  - **Rules for the local endpoint.**
+    - Log the served model version with every judge call. The models change without notice, so judge each comparison within one short window, and re-judge everything if the version changes.
+    - No quotas are published, and the endpoint is shared. Keep concurrency low and back off on errors.
+    - Temperature 0 must work; the key test checks it.
 
 ### Phase 0: setup
 
@@ -118,7 +127,8 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 
 **Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
 
-- **Gate 1, judge sanity:** re-judging the stored `claude-code` row in the Martian results must come close to its published score.
+- **Gate 1, judge sanity:** re-judge the stored `claude-code` row with one of the published judges, and compare the result with that judge's published score. This checks our copy of the judge pipeline. It needs about 700 judge calls (50 reviews × ~14 pairs), a few dollars on a paid API.
+- **Gate 1b, local-judge agreement** (free; judge calls only, no review runs): each local judge re-judges the stored rows of several published tools. Its ranking of those tools must agree closely with the published rankings. A local judge that fails isn't used.
 - **Gate 2, early stop:** the full board must score a higher F1 than `/code-review` on the pilot PRs, using the development judge, Martian's Core profile, and board findings labeled CONFIRMED or PLAUSIBLE. If it doesn't, stop and rethink the design before spending more usage.
 
 ### Phase 4: full runs, select the default board
@@ -318,12 +328,15 @@ board-review/
 - Reviewer model: Claude Sonnet 5.5 at `medium` effort, for every variant.
 - Accounts: A (Pro) and B (Team Standard), runs split by PR at about 5 : 4 (B : A).
 - Usage ceiling: at most 50% of each account's weekly limit, unless both collaborators agree otherwise.
-- Judges: Martian's extraction, dedup, and judge steps, unchanged, billed by API (5.1).
+- Judges: Martian's extraction, dedup, and judge steps, unchanged, called through an OpenAI-compatible endpoint (5.1).
+- Development judge: `deepseek-flash` on account A's free local endpoint, subject to Gate 1b.
 
 **Open:**
 
-1. **Judge endpoint**, and who pays for judge calls.
-2. **Who builds which part** of Phases 1 and 2.
+1. **Final judge panel:** free local panel (option 1) or the paid published judges (option 2); see 5.1. Recommendation: option 1, because the project compares a, b, and c with each other, not with the leaderboard. Gate 1 needs a few dollars of paid judging either way.
+2. **Gate 2 metric:** board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal), CONFIRMED only, or the raw union.
+3. **Pinned Claude Code version** for both machines. Account A runs 2.1.317; Yara tested the clean setup on 2.1.309.
+4. **Who builds which part** of Phases 1 and 2.
 
 ## 11. Known limits
 
