@@ -1,0 +1,5 @@
+{"pr_id": "smoke", "comment": "search_users formats the user-supplied name into the SQL query with an f-string, which allows SQL injection. Use bound query parameters.", "severity": "Critical", "category": "security"}
+{"pr_id": "smoke", "comment": "Pages start at 1, but offset = page * PAGE_SIZE skips the first page of results. It should be (page - 1) * PAGE_SIZE.", "severity": "High", "category": "bug"}
+{"pr_id": "smoke", "comment": "average_order_value divides by len(totals) and raises ZeroDivisionError for a user with no orders.", "severity": "High", "category": "bug"}
+{"pr_id": "smoke", "comment": "reports.user_label still calls get_user(user_id), but get_user now takes (db, user_id), so the call fails at runtime.", "severity": "High", "category": "api"}
+{"pr_id": "smoke", "comment": "unique_emails tests membership against a list inside the loop, which is quadratic. Use a set.", "severity": "Low", "category": "perf"}
