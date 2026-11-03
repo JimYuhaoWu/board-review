@@ -118,7 +118,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 
 ### Phase 2: build the harness
 
-1. **Fetch.** Clone each benchmark PR's fork and record the base and head commits. The Martian golden file flags 5 of the 50 PRs as unusable: 4 because "reviewed commit is not in the repo", 1 because it mixes many PRs. Confirm the real runnable count; PR-AF reports 38. This plan assumes about 40.
+1. **Fetch.** Clone each benchmark PR's fork and record the base and head commits. The Martian golden file flags 5 of the 50 PRs as unusable: 4 because "reviewed commit is not in the repo", 1 because it mixes many PRs. Confirm the real runnable count; PR-AF reports 38. **Result: 45 runnable** (Y1); the 5 unrunnable are exactly the flagged PRs.
 2. **Run.** Each (variant, PR, repeat) gets a fresh worktree at the head commit and one `claude -p ... --output-format stream-json --verbose` run, with the settings in 5.1. The model and effort are passed with `--model` and `--effort`, and `/code-review`'s level is typed in the command, so nothing falls back to a default or a remembered setting.
    - The runner reads the setup from the run's `init` event: Claude Code version, model, MCP servers, plugins, and skills. A run whose setup differs from the expected one is discarded.
 3. **Prevent leakage.**
@@ -134,7 +134,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 
 ### Phase 3: measure, pilot, decide whether to continue
 
-**Step 1, freeze the split.** Before any results are scored, split the runnable PRs into about 15 development PRs and about 25 test PRs, stratified by repo. The split is recorded in the repo and never changed.
+**Step 1, freeze the split.** Before any results are scored, split the runnable PRs into 15 development PRs and 30 test PRs, 3 development PRs per repo, with a recorded seed. The split also fixes the 10 pilot PRs. It is in `eval/datasets/martian/split.json` and never changed.
 
 **Step 2, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once, while nothing else uses the account. `/usage` counts all work on the account, so other work would inflate the numbers. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats and the account split. These 2 runs also count as that PR's pilot runs.
 
@@ -208,20 +208,20 @@ The main comparison keeps every role on Sonnet 5.5, so a win can't come from a s
 - **Statistics:** paired bootstrap over PRs.
 - **If a and c are too close to call**, add a third repeat on the test PRs only.
 
-About 25 test PRs means only large differences will be significant. A secondary result on all runnable PRs is reported too, flagged as optimistic for b, because b's members were selected on part of that data.
+With 30 test PRs, only fairly large differences will be significant. A secondary result on all runnable PRs is reported too, flagged as optimistic for b, because b's members were selected on part of that data.
 
-### 5.2 Run budget (about 40 runnable PRs)
+### 5.2 Run budget (45 runnable PRs)
 
 | Step | Runs |
 |---|---|
 | Phase 3, usage measurement (counted as one pilot PR) | 2 |
 | Phase 3, pilot on the other 9 PRs × 2 variants (kept as repeat 1) | 18 |
-| Phase 4, repeat 1 on the remaining 30 PRs × 2 variants | 60 |
-| Phase 4, repeat 2 on all 40 PRs × 2 variants | 80 |
+| Phase 4, repeat 1 on the remaining 35 PRs × 2 variants | 70 |
+| Phase 4, repeat 2 on all 45 PRs × 2 variants | 90 |
 | Phase 4, real default-board runs on ~15 development PRs (check of offline b) | ~15 |
-| **Total** | **~175**, plus judge calls |
-| Minimum option: 1 repeat only, plus the b check | ~95 |
-| Optional: third repeat on test PRs | +50 |
+| **Total** | **~195**, plus judge calls |
+| Minimum option: 1 repeat only, plus the b check | ~105 |
+| Optional: third repeat on test PRs | +60 |
 | Optional Phase 4b: 1–2 members × ~15 development PRs × 2 repeats, plus adjudication-only verifier runs | ~30–60 single-member runs, ~30 adjudication runs |
 
 The earlier draft needed about 305 runs. The savings come from three changes: variant b computed offline, one run set shared by development and test PRs, and pilot and measurement runs reused.
@@ -334,7 +334,7 @@ In Phase 3 step 2, record the session and weekly usage percentages shown by `/us
 
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
-If ~175 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~95 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
+If ~195 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~105 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
 
 ### 7.3 Splitting runs between accounts
 
@@ -378,6 +378,7 @@ board-review/
 - Intent: both variants get the PR title and description (5.1), with "neither" as the fallback.
 - Gate 1's paid judge: Claude Sonnet 4.5 through OpenRouter, with the pass rule in Phase 3.
 - Pinned Claude Code version: 2.1.317 on both machines.
+- Dataset: all 45 runnable Martian PRs, split 15 development / 30 test with seed 20261103, frozen in `split.json` (Yara, 2026-11-03).
 
 - Work split: see [TASKS.md](TASKS.md). Account A's side builds the skill, scoring, and judge gates. Yara builds the data pipeline, the split, and the runner, and owns the optional Phase 4b.
 
