@@ -270,6 +270,15 @@ def test_usage_limit_is_never_an_empty_review(tmp_path: Path, monkeypatch: pytes
     assert not runner.is_done(paths, spec)
 
 
+def test_api_error_status_names_the_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[3])
+    _run_with(monkeypatch, [_init_event(), {"type": "result", "is_error": True, "subtype": "success",
+                                             "terminal_reason": "api_error", "result": "issue with the model"}])
+    meta = runner.run_one(_spec(tmp_path, "code-review", path, base, head), _paths(tmp_path), "B")
+    assert meta.status == "failed:api_error"
+
+
 def test_setup_mismatch_stops_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])

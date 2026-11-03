@@ -7,6 +7,7 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner run --variant V (--prs IDS | --set S) --repeat N [--dry-run]   # Y4
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
+    uv run python -m eval.runner pack --variant V (--prs IDS | --set S) --repeat N            # zip for judging
 
 `run` exits 0 when every run is done, 1 when some failed, and 3 when it stopped at a plan usage
 limit. Run the same command again after the reset; finished runs are skipped.
@@ -22,10 +23,12 @@ from __future__ import annotations
 
 import argparse
 import collections
+import datetime as dt
 import os
 from pathlib import Path
 
 from eval.runner import martian
+from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
 from eval.runner.run import VARIANTS, Paths, RunSpec, check_claude, command_for, is_done, run_one
 from eval.runner.split import Split, make_split, write_frozen
@@ -53,23 +56,15 @@ def main(argv: list[str] | None = None) -> int:
     split.add_argument("--pilot-per-repo", type=int, default=2)
 
     run = sub.add_parser("run", help="run variants through claude -p (Y4)")
-    run.add_argument("--variant", choices=[*VARIANTS, "both"], required=True)
-    run.add_argument("--repeat", type=int, required=True)
-    which = run.add_mutually_exclusive_group(required=True)
-    which.add_argument("--prs", help="comma-separated PR ids")
-    which.add_argument("--set", choices=["pilot", "dev", "test", "all"], help="PRs from split.json")
-    which.add_argument("--smoke-repo", type=Path, help="a repository from eval/smoke/make_repo.sh")
-    run.add_argument("--base", help="base SHA, with --smoke-repo")
-    run.add_argument("--head", help="head SHA, with --smoke-repo")
-    run.add_argument("--members", default="full", help="board roster; anything but full only with --smoke-repo")
-    run.add_argument("--intent-file", type=Path, help="PR title and description, with --smoke-repo")
-    run.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
-    run.add_argument("--data-dir", type=Path, default=_default_data_dir())
-    run.add_argument("--results-dir", type=Path, default=ROOT / "eval" / "results")
+    _add_selection(run)
     run.add_argument("--cache-dir", type=Path, default=ROOT / "eval" / "cache")
     run.add_argument("--config-dir", type=Path, default=Path.home() / ".claude-bench")
     run.add_argument("--claude", default="claude", help="the pinned standalone Claude Code")
     run.add_argument("--dry-run", action="store_true", help="print the commands; run nothing")
+
+    pack = sub.add_parser("pack", help="zip finished runs for the judging machine")
+    _add_selection(pack)
+    pack.add_argument("--out", type=Path, help="default: eval/results/packs/<dataset>-<which>-r<N>-<time>.zip")
 
     args = parser.parse_args(argv)
     if args.command == "fetch":
@@ -78,7 +73,26 @@ def main(argv: list[str] | None = None) -> int:
         return _golden(args)
     if args.command == "split":
         return _split(args)
+    if args.command == "pack":
+        return _pack(args)
     return _run(args)
+
+
+def _add_selection(p: argparse.ArgumentParser) -> None:
+    """Which runs: the variant, the PRs, and the repeat. Shared by `run` and `pack`."""
+    p.add_argument("--variant", choices=[*VARIANTS, "both"], required=True)
+    p.add_argument("--repeat", type=int, required=True)
+    which = p.add_mutually_exclusive_group(required=True)
+    which.add_argument("--prs", help="comma-separated PR ids")
+    which.add_argument("--set", choices=["pilot", "dev", "test", "all"], help="PRs from split.json")
+    which.add_argument("--smoke-repo", type=Path, help="a repository from eval/smoke/make_repo.sh")
+    p.add_argument("--base", help="base SHA, with --smoke-repo")
+    p.add_argument("--head", help="head SHA, with --smoke-repo")
+    p.add_argument("--members", default="full", help="board roster; anything but full only with --smoke-repo")
+    p.add_argument("--intent-file", type=Path, help="PR title and description, with --smoke-repo")
+    p.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    p.add_argument("--data-dir", type=Path, default=_default_data_dir())
+    p.add_argument("--results-dir", type=Path, default=ROOT / "eval" / "results")
 
 
 def _fetch(args: argparse.Namespace) -> int:
@@ -161,6 +175,21 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
         for d, i, repo, base, head, intent in targets
         for v in variants
     ]
+
+
+def _pack(args: argparse.Namespace) -> int:
+    specs = _run_specs(args)
+    which = args.set or ("smoke" if args.smoke_repo else f"{len(specs)}runs")
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M")
+    out = args.out or args.results_dir / "packs" / f"{specs[0].dataset}-{which}-r{args.repeat}-{stamp}.zip"
+    packed, skipped = pack_runs(
+        args.results_dir, [(s.dataset, s.variant, s.pr_id, s.repeat) for s in specs], out
+    )
+    for name in skipped:
+        print(f"  not packed: {name}")
+    print(f"{len(packed)} runs -> {out} ({out.stat().st_size / 1e6:.1f} MB)")
+    print("On the judging machine, extract it at the repo root: uv run python -m zipfile -e <zip> .")
+    return 0 if packed else 1
 
 
 def _run(args: argparse.Namespace) -> int:
