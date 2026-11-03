@@ -195,24 +195,38 @@ def cmd_subsets(args) -> None:
                                          if c else "none meets the precision floor"))
 
 
-async def cmd_gate1(args) -> None:
-    from .gates import gate1_report, judge_stored
-
+def _martian_dir(args) -> Path:
     martian = Path(args.martian_dir or os.environ.get("MARTIAN_DIR", ""))
     if not (martian / "results" / "benchmark_data.json").exists():
         sys.exit("Point --martian-dir (or MARTIAN_DIR) at the pinned Martian clone's offline/ folder.")
-    if not args.report_only:
-        jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
-                        log=tqdm.write)
-        try:
-            served = await jm.identify()
-            print(f"judge {args.judge}: fingerprint {jm.fingerprint}, served {served.get('canonical_slug') or served.get('id')}")
-            await judge_stored(jm, martian, [args.tool])
-        except EndpointUnavailable as e:
-            print(f"STOPPED: {e}")
-            print(f"{jm.calls} calls this session. Finished calls are cached; re-run to continue.")
-            return
-        print(f"done: {jm.calls} calls this session")
+    return martian
+
+
+async def _judge_gate(args, martian: Path, tools: list[str], repeat: int = 0) -> tuple[bool, dict | None]:
+    """Judge the stored reviews; returns (finished, repeat-check result). Reports run after the loop closes."""
+    from .gates import judge_stored, repeat_check
+
+    jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
+                    log=tqdm.write)
+    try:
+        served = await jm.identify()
+        print(f"{dt.datetime.now():%H:%M} judge {args.judge}: fingerprint {jm.fingerprint}, served {json.dumps(served)}")
+        await judge_stored(jm, martian, tools)
+        result = await repeat_check(jm, repeat) if repeat else None
+    except EndpointUnavailable as e:
+        print(f"STOPPED: {e}")
+        print(f"{jm.calls} calls this session. Finished calls are cached; re-run to continue.")
+        return False, None
+    print(f"{dt.datetime.now():%H:%M} done: {jm.calls} calls this session")
+    return True, result
+
+
+def cmd_gate1(args) -> None:
+    from .gates import gate1_report
+
+    martian = _martian_dir(args)
+    if not args.report_only and not asyncio.run(_judge_gate(args, martian, [args.tool]))[0]:
+        return
     text, _ = gate1_report(args.judge, args.published, martian, args.tool, args.profile)
     print(text)
     report = ROOT / "eval" / "reports" / f"gate1-{judge_slug(args.judge)}.md"
@@ -221,29 +235,17 @@ async def cmd_gate1(args) -> None:
     print(f"\nWritten to {report.relative_to(ROOT)}")
 
 
-async def cmd_gate1b(args) -> None:
-    from .gates import gate1b_report, judge_stored, repeat_check
+def cmd_gate1b(args) -> None:
+    from .gates import gate1b_report
 
-    martian = Path(args.martian_dir or os.environ.get("MARTIAN_DIR", ""))
-    if not (martian / "results" / "benchmark_data.json").exists():
-        sys.exit("Point --martian-dir (or MARTIAN_DIR) at the pinned Martian clone's offline/ folder.")
+    martian = _martian_dir(args)
     tools = args.tools.split(",")
     report = ROOT / "eval" / "reports" / f"gate1b-{judge_slug(args.judge)}.md"
+    repeat = None
     if not args.report_only:
-        jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
-                        log=tqdm.write)
-        try:
-            served = await jm.identify()
-            print(f"{dt.datetime.now():%H:%M} judge {args.judge}: fingerprint {jm.fingerprint}, served {json.dumps(served)}")
-            await judge_stored(jm, martian, tools)
-            repeat = await repeat_check(jm, args.repeat) if args.repeat else None
-        except EndpointUnavailable as e:
-            print(f"STOPPED: {e}")
-            print(f"{jm.calls} calls this session. Finished calls are cached; re-run to continue.")
+        finished, repeat = asyncio.run(_judge_gate(args, martian, tools, args.repeat))
+        if not finished:
             return
-        print(f"{dt.datetime.now():%H:%M} done: {jm.calls} calls this session")
-    else:
-        repeat = None
     text, passed = gate1b_report(args.judge, martian, tools, args.profile)
     if repeat:
         text += (f"\n\nRepeat check: {repeat['sampled']} cached judge prompts asked again; same verdict "
@@ -307,9 +309,9 @@ def main() -> None:
     if args.cmd == "judge":
         asyncio.run(cmd_judge(args))
     elif args.cmd == "gate1b":
-        asyncio.run(cmd_gate1b(args))
+        cmd_gate1b(args)
     elif args.cmd == "gate1":
-        asyncio.run(cmd_gate1(args))
+        cmd_gate1(args)
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets}[args.cmd](args)
 
