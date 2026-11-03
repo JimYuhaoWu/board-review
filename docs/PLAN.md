@@ -73,7 +73,9 @@ How the user picks members:
   - **a:** built-in `/code-review medium --max-findings all <base>..<head>`.
   - **c:** full board, `/board-review --members full <base>..<head>`.
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
-- **Judge:** one judge model during development. A panel of 3 (Claude Opus 4.5, Claude Sonnet 4.5, GPT-5.2, 2 of 3 must agree) for the final numbers only. Judge calls are billed by API, outside both plans.
+- **Judge:** billed by API, outside both plans.
+  - **Development judge:** DeepSeek (`deepseek-flash` or `deepseek-v4-pro`, fixed once chosen), if it passes the agreement check in Phase 3. A non-Claude judge also avoids Claude grading Claude.
+  - **Final panel:** 3 judges from different model families, 2 of 3 must agree, for the final numbers only. The default panel is Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, which match the judges of the published Martian results; it needs a multi-model provider such as OpenRouter.
 
 ### Phase 0: setup
 
@@ -112,6 +114,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 **Step 3, pilot.** 10 development PRs (2 per repo), variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
 
 - **Gate 1, judge sanity:** re-judging the stored `claude-code` row in the Martian results must come close to its published score.
+- **Gate 1b, development-judge agreement** (judge calls only, no review runs): the development judge re-judges the stored rows of several published tools. Its ranking of those tools must agree closely with the published ranking. If it doesn't, use a judge from the final panel for development too.
 - **Gate 2, early stop:** if the full board does not beat `/code-review` on the pilot PRs, stop and rethink the design before spending more usage.
 
 ### Phase 4: full runs, select the default board
@@ -314,7 +317,7 @@ board-review/
 
 **Open:**
 
-1. **Judge endpoint**, and who pays for judge calls.
+1. **Final judge panel provider**, and who pays for judge calls. DeepSeek is the planned development judge.
 2. **Who builds which part** of Phases 1 and 2.
 
 ## 11. Known limits

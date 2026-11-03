@@ -78,6 +78,7 @@ The variables keep the `MARTIAN_` prefix because the benchmark's own scripts rea
 | Martian gateway | `https://api.withmartian.com/v1` | Many models with one key | The benchmark's default. Supports the full 3-judge panel. |
 | Anthropic, OpenAI compatibility | `https://api.anthropic.com/v1/` | Claude only | Uses an Anthropic Console API key. No GPT judge, so it can't run the full panel alone. |
 | OpenAI | `https://api.openai.com/v1` | GPT only | No Claude judge, so it can't run the full panel alone. |
+| DeepSeek | `https://api.deepseek.com` | DeepSeek only (e.g. `deepseek-flash`, `deepseek-v4-pro`) | Cheap. A good **development judge** after the agreement check in PLAN Phase 3. It can't run the full panel alone. |
 
 Recommendation: **one OpenRouter key**, because one key covers the whole judge panel (Claude Opus 4.5, Claude Sonnet 4.5, GPT-5.2). Check the provider's model list for the exact model ids before the first run.
 
@@ -87,7 +88,14 @@ Judge cost is measured in the pilot. Set a spending limit at the provider before
 
 ## 6. Permission to run the benchmark pipeline
 
-Claude Code's auto mode can block running code from an external repository. Before Phase 2, allow the benchmark's Python steps, for example with a project permission rule for `uv run python -m code_review_benchmark.*`. Ask Claude Code to add the rule with the `update-config` skill, or approve each run when prompted.
+Claude Code's auto mode can block running code from an external repository. The repo's `.claude/settings.json` already allows exactly these commands, so nothing is needed on either machine:
+
+- `uv sync`: installs the benchmark's Python dependencies.
+- `uv run python -m code_review_benchmark.*`: runs the benchmark's pipeline steps.
+
+Any other command still asks for approval. Claude Code applies project settings only after you trust the folder.
+
+After installing uv with winget, open a new terminal so `uv` is on `PATH`.
 
 ## 7. Benchmark source
 
@@ -99,7 +107,7 @@ The Martian benchmark is pinned in [`eval/datasets/martian/SOURCE.md`](../eval/d
 |---|---|---|
 | 1. Claude Code ≥ 2.1.288 | ✅ 2.1.317 | ☐ |
 | 2. `ANTHROPIC_API_KEY` not set | ✅ | ☐ |
-| 3. Python ≥ 3.11 and uv | Python 3.14.5 ✅, uv ☐ | ☐ |
+| 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ☐ |
 | 4. Git line endings | handled by the harness | handled by the harness |
 | 5. Judge key in `.env` | ☐ | ☐ (only if this account runs the judge) |
-| 6. Pipeline permission | ☐ | ☐ |
+| 6. Pipeline permission | ✅ (project rule, shared) | ✅ (comes with the repo) |
