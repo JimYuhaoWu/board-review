@@ -125,7 +125,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 4. **Survive usage limits.**
    - A run that stops at a usage limit is marked `failed: usage-limit`, never recorded as an empty review.
    - The runner stops for that account and resumes after the reset.
-   - Findings are cached per member, so a resumed run only re-runs the members that didn't finish.
+   - A board run is one `claude -p` call, so a resumed run re-runs the whole (variant, PR, repeat). Running the same command again skips finished runs.
 5. **Score every variant the same way.** Both variants report structured findings (the board's JSON; `/code-review`'s `ReportFindings` call). Each finding is rendered as its location plus its one-sentence statement and goes through Martian's own extraction, dedup, and judge steps, unmodified. Extraction runs one finding at a time, so findings keep their member and label for subset scoring. Martian extracts a tool's whole review at once, so that mode is scored too, as a check. Details in `eval/scoring/README.md`.
 6. **Score board runs three ways:** CONFIRMED only, CONFIRMED + PLAUSIBLE, and the raw union before adjudication.
 7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2; only approximate if the account is used for other work at the same time), and the run metadata in section 6.4.

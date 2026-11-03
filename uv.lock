@@ -34,6 +34,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "openai" },
+    { name = "pydantic" },
     { name = "tqdm" },
 ]
 
@@ -45,6 +46,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "openai", specifier = ">=1.10.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]
 

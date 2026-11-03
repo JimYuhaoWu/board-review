@@ -5,6 +5,7 @@ description = "Evaluation harness for the board-review plugin"
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.10.0",
+    "pydantic>=2",
     "tqdm>=4.66.0",
 ]
 
@@ -17,5 +18,5 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["eval/scoring/tests"]
+testpaths = ["eval/scoring/tests", "eval/runner/tests"]
 pythonpath = ["."]
