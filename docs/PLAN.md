@@ -79,7 +79,11 @@ How the user picks members:
 
 ### Phase 0: setup
 
-- Claude Code 2.1.288 or later on both machines, which `--max-findings` needs. Both machines use the same version for every run.
+- **One pinned Claude Code version on both machines**, 2.1.288 or later, which `--max-findings` needs. Install it as a standalone CLI with `claude install <version>`, log it in to the account's plan, and set `DISABLE_AUTOUPDATER=1`. Don't run benchmarks with the copy bundled in the desktop app: it updates with the app and isn't logged in when run on its own.
+- **A clean Claude Code setup for benchmark runs**, the same on both machines. A personal setup (user CLAUDE.md, auto-memory, hooks, MCP servers, plugins, skills) changes what the reviewer writes and adds usage to every run. Tested on 2.1.309:
+  - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill must be packaged as a plugin, and it then shows up as `<plugin>:board-review`.
+  - `--safe-mode` doesn't work: it hides skills loaded through `--plugin-dir`.
+  - `--bare` doesn't work: it accepts only an API key, not a plan login.
 - A judge API key for an OpenAI-compatible endpoint, such as the Martian gateway or OpenRouter. It stays in a local `.env` and is never committed.
 - Allow Claude Code to run the benchmark's Python pipeline (MIT-licensed). Auto mode may block external code until a permission rule allows it.
 - On Windows, set `core.autocrlf=false` in every benchmark clone. Otherwise CRLF conversion makes whole files appear changed in the diff.
@@ -93,7 +97,8 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 ### Phase 2: build the harness
 
 1. **Fetch.** Clone each benchmark PR's fork and record the base and head commits. The Martian golden file flags 5 of the 50 PRs as unusable: 4 because "reviewed commit is not in the repo", 1 because it mixes many PRs. Confirm the real runnable count; PR-AF reports 38. This plan assumes about 40.
-2. **Run.** Each (variant, PR, repeat) gets a fresh worktree at the head commit and one `claude -p ... --output-format json` run, with the settings in 5.1. Effort is typed explicitly, so `/code-review` can't reuse a remembered level.
+2. **Run.** Each (variant, PR, repeat) gets a fresh worktree at the head commit and one `claude -p ... --output-format stream-json --verbose` run, with the settings in 5.1. The model and effort are passed with `--model` and `--effort`, and `/code-review`'s level is typed in the command, so nothing falls back to a default or a remembered setting.
+   - The runner reads the setup from the run's `init` event: Claude Code version, model, MCP servers, plugins, and skills. A run whose setup differs from the expected one is discarded.
 3. **Prevent leakage.**
    - Edit, Write, WebFetch, and WebSearch are disallowed, so a reviewer can't look up the upstream fix.
    - The working directory is outside the benchmark repo, so the reviewer never sees the golden comments.
@@ -103,18 +108,18 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
    - Findings are cached per member, so a resumed run only re-runs the members that didn't finish.
 5. **Score every variant the same way.** Each review is rendered as one general comment and goes through Martian's own extraction, dedup, and judge steps, unmodified. The board's structured JSON gets no advantage over `/code-review`'s text.
 6. **Score board runs three ways:** CONFIRMED only, CONFIRMED + PLAUSIBLE, and the raw union before adjudication.
-7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2), and the run metadata in section 6.4.
+7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2; only approximate if the account is used for other work at the same time), and the run metadata in section 6.4.
 
 ### Phase 3: measure, pilot, decide whether to continue
 
-**Step 1, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats and the account split.
+**Step 1, freeze the split.** Before any results are scored, split the runnable PRs into about 15 development PRs and about 25 test PRs, stratified by repo. The split is recorded in the repo and never changed.
 
-**Step 2, freeze the split.** Before any results are scored, split the runnable PRs into about 15 development PRs and about 25 test PRs, stratified by repo. The split is recorded in the repo and never changed.
+**Step 2, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once, while nothing else uses the account. `/usage` counts all work on the account, so other work would inflate the numbers. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats and the account split. These 2 runs also count as that PR's pilot runs.
 
-**Step 3, pilot.** 10 development PRs (2 per repo), variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
+**Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
 
 - **Gate 1, judge sanity:** re-judging the stored `claude-code` row in the Martian results must come close to its published score.
-- **Gate 2, early stop:** if the full board does not beat `/code-review` on the pilot PRs, stop and rethink the design before spending more usage.
+- **Gate 2, early stop:** the full board must score a higher F1 than `/code-review` on the pilot PRs, using the development judge, Martian's Core profile, and board findings labeled CONFIRMED or PLAUSIBLE. If it doesn't, stop and rethink the design before spending more usage.
 
 ### Phase 4: full runs, select the default board
 
@@ -159,15 +164,15 @@ About 25 test PRs means only large differences will be significant. A secondary 
 
 | Step | Runs |
 |---|---|
-| Phase 3, usage measurement | 2 |
-| Phase 3, pilot (10 PRs × 2 variants, kept as repeat 1) | 20 |
+| Phase 3, usage measurement (counted as one pilot PR) | 2 |
+| Phase 3, pilot on the other 9 PRs × 2 variants (kept as repeat 1) | 18 |
 | Phase 4, repeat 1 on the remaining 30 PRs × 2 variants | 60 |
 | Phase 4, repeat 2 on all 40 PRs × 2 variants | 80 |
-| **Total** | **~162**, plus judge calls |
-| Minimum option: 1 repeat only | ~82 |
+| **Total** | **~160**, plus judge calls |
+| Minimum option: 1 repeat only | ~80 |
 | Optional: third repeat on test PRs | +50 |
 
-The earlier draft needed about 305 runs. The savings come from three changes: variant b computed offline, one run set shared by development and test PRs, and pilot runs reused.
+The earlier draft needed about 305 runs. The savings come from three changes: variant b computed offline, one run set shared by development and test PRs, and pilot and measurement runs reused.
 
 ## 6. A reusable evaluation pipeline
 
@@ -230,7 +235,7 @@ eval/datasets/<name>/
 
 Each run records: dataset commit, PR id, variant, roster, member file hashes, adjudicator hash, reviewer model, effort, Claude Code version, judge models and judge prompt version, cost, time, usage percentages, and which account ran it.
 
-Results from different reviewer models or judges are never pooled. Results from different accounts are pooled, because the account doesn't change the model's output.
+Results from different reviewer models or judges are never pooled. Results from different accounts are pooled, because with the same pinned version and the clean setup (Phase 0), the account doesn't change the model's output.
 
 ### 6.5 Member cards
 
@@ -271,13 +276,13 @@ Both accounts also carry their owners' daily work, so the experiment must not us
 
 ### 7.2 Measure, then plan
 
-In Phase 3 step 1, record the session and weekly usage percentages shown by `/usage` before and after each run. Then:
+In Phase 3 step 2, record the session and weekly usage percentages shown by `/usage` before and after each run, while nothing else uses the account. Then:
 
 > runs per week per account ≈ (weekly % the experiment may use) ÷ (weekly % per run)
 
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
-If ~162 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~82 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
+If ~160 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~80 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
 
 ### 7.3 Splitting runs between accounts
 
