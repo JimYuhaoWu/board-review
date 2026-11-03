@@ -4,4 +4,4 @@ A Claude Code skill for reviewing code after a long coding session. A board of s
 
 The repo also holds a reusable evaluation pipeline built on the [Martian Code Review Bench](https://github.com/withmartian/code-review-benchmark). It decides which members belong on the default board, and makes it cheap to test new members, including members for specific fields.
 
-**Status:** plan approved; setup (Phase 0) is next. Read [docs/PLAN.md](docs/PLAN.md) for the full plan, including the decisions in section 10.
+**Status:** Phase 0 (setup) in progress, see [docs/SETUP.md](docs/SETUP.md). Read [docs/PLAN.md](docs/PLAN.md) for the full plan, including the decisions in section 10.
