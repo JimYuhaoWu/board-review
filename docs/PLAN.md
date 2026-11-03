@@ -74,6 +74,8 @@ How the user picks members:
   - **c:** full board, `/board-review --members full <base>..<head>`.
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
 - **Judge:** one judge model during development. A panel of 3 (Claude Opus 4.5, Claude Sonnet 4.5, GPT-5.2, 2 of 3 must agree) for the final numbers only. Judge calls are billed by API, outside both plans.
+  - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on the API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
+  - **Judge choice moves scores.** Martian's three judges agree on 95% of golden comments (Cohen's κ ≈ 0.90), yet Claude Code's published F1 ranges from 39% (Sonnet 4.5) to 49% (Opus 4.5). Gate 1 compares against the published score of the same judge.
 
 ### Phase 0: setup
 
@@ -275,7 +277,7 @@ In Phase 3 step 1, record the session and weekly usage percentages shown by `/us
 
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
-If ~162 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~82 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits.
+If ~162 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~82 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
 
 ### 7.3 Splitting runs between accounts
 
@@ -311,6 +313,7 @@ board-review/
 - Reviewer model: Claude Sonnet 5.5 at `medium` effort, for every variant.
 - Accounts: A (Pro) and B (Team Standard), runs split by PR at about 5 : 4 (B : A).
 - Usage ceiling: at most 50% of each account's weekly limit, unless both collaborators agree otherwise.
+- Judges: Martian's extraction, dedup, and judge steps, unchanged, billed by API (5.1).
 
 **Open:**
 
