@@ -169,14 +169,21 @@ def config_hash(spec: RunSpec, version: str, hashes: dict[str, str]) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
 
 
-def plugin_snapshot(work: Path, hashes: dict[str, str]) -> Path:
-    """A frozen copy of the plugin outside this repository, keyed by its file hashes.
+def plugin_tree_hash(root: Path = PLUGIN_DIR) -> str:
+    """Hash of every file in the plugin, paths included."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def plugin_snapshot(work: Path) -> Path:
+    """A frozen copy of the plugin outside this repository, keyed by the hash of all its files.
 
     Runs load the copy, so no path a reviewer sees points into the repository that holds the
     golden comments, and an edit to the plugin can't change runs halfway through a batch.
     """
-    key = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()[:12]
-    dest = work.parent / "plugin" / key
+    dest = work.parent / "plugin" / plugin_tree_hash()
     if not dest.exists():
         shutil.copytree(PLUGIN_DIR, dest)
     return dest
@@ -225,10 +232,13 @@ def _windows_git_bash() -> Path | None:
 def check_claude(paths: Paths) -> str:
     """The account letter (A or B), after checking the pinned version and the clean config login."""
     env = clean_env(paths.config_dir)
-    version = subprocess.run([paths.claude, "--version"], capture_output=True, text=True, env=env).stdout
+    # Decode as UTF-8, not the system locale: on Chinese Windows that is GBK, and the org name
+    # in `auth status` can be non-ASCII.
+    utf8 = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "env": env}
+    version = subprocess.run([paths.claude, "--version"], **utf8).stdout
     if not version.startswith(PINNED_VERSION):
         raise RuntimeError(f"{paths.claude} is {version.strip()!r}, expected {PINNED_VERSION}")
-    status = subprocess.run([paths.claude, "auth", "status"], capture_output=True, text=True, env=env)
+    status = subprocess.run([paths.claude, "auth", "status"], **utf8)
     auth = json.loads(status.stdout or "{}")
     if not auth.get("loggedIn") or auth.get("apiKeySource"):
         raise RuntimeError(f"{paths.config_dir} is not logged in to a plan")
@@ -254,7 +264,7 @@ def run_one(spec: RunSpec, paths: Paths, account: str) -> RunMeta:
         intent_file = run_work / f"r{spec.repeat}-intent" / "intent.txt"
         intent_file.parent.mkdir(parents=True, exist_ok=True)
         intent_file.write_text(spec.intent, encoding="utf-8", newline="\n")
-    command = command_for(spec, paths.claude, intent_file, plugin_snapshot(paths.work, hashes))
+    command = command_for(spec, paths.claude, intent_file, plugin_snapshot(paths.work))
     meta = RunMeta(
         dataset=spec.dataset,
         dataset_commit=_dataset_commit(),
