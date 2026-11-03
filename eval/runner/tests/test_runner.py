@@ -127,6 +127,16 @@ def test_clean_env_drops_inherited_claude_settings(monkeypatch: pytest.MonkeyPat
     assert venv_bin not in path and sibling in path, "only paths inside the repository are dropped"
 
 
+def test_plugin_hash_covers_every_file(tmp_path: Path):
+    root = tmp_path / "plugin"
+    (root / ".claude-plugin").mkdir(parents=True)
+    manifest = root / ".claude-plugin" / "plugin.json"
+    manifest.write_text('{"name": "board-review"}', encoding="utf-8")
+    before = runner.plugin_tree_hash(root)
+    manifest.write_text('{"name": "board-review", "version": "0.2.0"}', encoding="utf-8")
+    assert runner.plugin_tree_hash(root) != before
+
+
 @pytest.mark.skipif(runner.os.name != "nt", reason="Windows only")
 def test_clean_env_points_claude_at_git_bash_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

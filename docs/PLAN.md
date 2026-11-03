@@ -104,6 +104,7 @@ How the user picks members:
   - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill is packaged as a plugin, and it shows up as `/board-review:review` (section 4).
   - `--safe-mode` doesn't work: it hides skills loaded through `--plugin-dir`.
   - `--bare` doesn't work: it accepts only an API key, not a plan login.
+  - The runner's `--setting-sources user` also keeps a benchmark repo's own `CLAUDE.md` out of the context (tested on 2.1.317 with a canary word; `AGENTS.md` isn't loaded either way). A reviewer can still open either file with a tool, and `/code-review` does look for `CLAUDE.md`. Two Martian PRs have one (`agent_files` in `prs.jsonl`).
 - A judge API key for an OpenAI-compatible endpoint, such as the Martian gateway or OpenRouter. It stays in a local `.env` and is never committed.
 - Allow Claude Code to run the benchmark's Python pipeline (MIT-licensed). Auto mode may block external code until a permission rule allows it.
 - On Windows, set `core.autocrlf=false` in every benchmark clone. Otherwise CRLF conversion makes whole files appear changed in the diff.
