@@ -1,7 +1,41 @@
 # board-review
 
-A Claude Code skill for reviewing code after a long coding session. A board of specialist reviewers looks at the change. The user picks the members before each run. An adjudicator labels every finding as CONFIRMED, PLAUSIBLE, or REFUTED, based on evidence.
+A Claude Code skill for reviewing code after a long coding session. A board of specialist reviewers looks at the change. The user picks the members before each run. Separate verifiers label every finding as CONFIRMED, PLAUSIBLE, or REFUTED, based on evidence.
 
 The repo also holds a reusable evaluation pipeline built on the [Martian Code Review Bench](https://github.com/withmartian/code-review-benchmark). It decides which members belong on the default board, and makes it cheap to test new members, including members for specific fields.
 
-**Status:** Phase 0 (setup) in progress, see [docs/SETUP.md](docs/SETUP.md). Read [docs/PLAN.md](docs/PLAN.md) for the full plan, including the decisions in section 10.
+**Status:** Phase 1 (building the skill). The default roster is still a hypothesis until the evaluation selects it. See [docs/PLAN.md](docs/PLAN.md) and [docs/SETUP.md](docs/SETUP.md).
+
+## Try it
+
+Load the plugin from a clone of this repo and start Claude Code in the repository you want reviewed:
+
+```bash
+claude --plugin-dir /path/to/board-review/plugin
+```
+
+Then, inside Claude Code:
+
+```
+/board-review:review                        # current branch vs upstream, uncommitted changes included; asks which members to use
+/board-review:review --members full main...HEAD
+/board-review:review --members intent,edge,saboteur 1234        # a pull request
+/board-review:review --format json HEAD~3..HEAD                  # machine-readable output
+```
+
+The review is read-only. Ask Claude to fix the CONFIRMED findings afterwards if you want them fixed.
+
+## Members
+
+| id | Focus | Default |
+|---|---|---|
+| `intent` | Does the change do what it claims? | yes |
+| `edge` | Edge cases, failure paths, swallowed errors | yes |
+| `saboteur` | Security: injection, auth, data exposure | yes |
+| `intern` | Explains what the change does; flags mismatches | yes |
+| `concurrency` | Races, ordering, stale state (runs when relevant) | no |
+| `contract` | Interface, schema, and signature breakage (runs when relevant) | no |
+| `perf` | Complexity and query patterns (runs when relevant) | no |
+| `nitpicker` | Naming, duplication, structure | no |
+
+A member is one Markdown file in `plugin/skills/review/members/`. See PLAN section 6 for adding one.

@@ -1,0 +1,12 @@
+{
+  "name": "board-review",
+  "displayName": "Board Review",
+  "version": "0.1.0",
+  "description": "Code review by a board of independent specialist reviewers, with evidence-based CONFIRMED / PLAUSIBLE / REFUTED labels from separate verifiers.",
+  "author": {
+    "name": "JimYuhaoWu",
+    "url": "https://github.com/JimYuhaoWu"
+  },
+  "repository": "https://github.com/JimYuhaoWu/board-review",
+  "keywords": ["code-review", "review", "adversarial"]
+}
