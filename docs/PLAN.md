@@ -332,6 +332,8 @@ In Phase 3 step 2, record the session and weekly usage percentages shown by `/us
 
 > runs per week per account ≈ (weekly % the experiment may use) ÷ (weekly % per run)
 
+**Result, account B (2026-11-03).** The pilot's 20 runs cost $8.16 API-equivalent: $0.07 per `/code-review` run and $0.74 per board run. About $10.7 of work moved the session meter 13 points and the weekly meter about 2 points. So on account B one weekly point is about $5 (between $3.50 and $10, because `/usage` shows whole percents), and a 5-hour session holds about $80. One PR with both variants is about 0.15 weekly points. The remaining ~175 runs need about 15 weekly points (7–20), even if account B runs all of them.
+
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
 If ~195 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~105 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
