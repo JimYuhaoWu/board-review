@@ -1,5 +1,10 @@
 """Judge gates (task J3).
 
+Gate 1: one published judge re-runs Martian's full pipeline on the stored `claude-code`
+reviews, through our harness. Pass rule (fixed before any result): for at least 90% of golden
+comments, found / not found agrees with Martian's published verdicts from the same judge, and
+F1 (Core) is within 3 points of the published F1.
+
 Gate 1b: a local judge re-judges the stored reviews of several published tools with
 Martian's full pipeline (extraction, dedup, judging), and its ranking of those tools is
 compared with the rankings of Martian's three published judges.
@@ -51,7 +56,7 @@ def _slug(url: str) -> str:
 async def judge_stored(jm: JudgeModel, martian_dir: Path, tools: list[str], log=print) -> Path:
     """Judge the stored reviews of `tools` with the full pipeline; one record per review."""
     data = json.loads((martian_dir / "results" / "benchmark_data.json").read_text(encoding="utf-8"))
-    out_dir = RESULTS / "gate1b" / judge_slug(jm.model)
+    out_dir = RESULTS / "stored" / judge_slug(jm.model)
     work = [(url, e, r) for url, e in data.items() for r in e["reviews"] if r["tool"] in tools]
     for url, entry, review in tqdm(work, desc=f"gate1b {jm.model}", unit="review"):
         out = out_dir / review["tool"] / f"{_slug(url)}.json"
@@ -96,7 +101,7 @@ def _published_f1(martian_dir: Path, tools: list[str], profile: str) -> dict[str
 
 
 def gate1b_report(judge: str, martian_dir: Path, tools: list[str], profile: str = "core") -> tuple[str, bool]:
-    base = RESULTS / "gate1b" / judge_slug(judge)
+    base = RESULTS / "stored" / judge_slug(judge)
     local, missing = {}, []
     for t in tools:
         records = [json.loads(f.read_text(encoding="utf-8")) for f in sorted((base / t).glob("*.json"))]
@@ -124,6 +129,41 @@ def gate1b_report(judge: str, martian_dir: Path, tools: list[str], profile: str 
     lines += ["", f"Mean tau with the published judges {mean_local:+.2f}; lowest tau between two published judges {floor:+.2f}. "
               + ("**Pass.**" if passed else "**Fail.**" + (f" Missing tools: {', '.join(missing)}." if missing else ""))]
     return "\n".join(lines), passed
+
+
+def gate1_report(judge: str, published: str, martian_dir: Path, tool: str = "claude-code",
+                 profile: str = "core") -> tuple[str, bool]:
+    records = {r["pr_url"]: r for r in (json.loads(f.read_text(encoding="utf-8"))
+                                        for f in sorted((RESULTS / "stored" / judge_slug(judge) / tool).glob("*.json")))}
+    ev = json.loads((martian_dir / "results" / published / "evaluations.json").read_text(encoding="utf-8"))
+    ours = {url: score(r, _ALL) for url, r in records.items()}
+    theirs = {url: e[tool] for url, e in ev.items() if tool in e and url in ours}
+    same = total = 0
+    for url, pub in theirs.items():
+        if pub.get("skipped") or ours[url].get("skipped"):
+            continue
+        found_pub = {t["golden_comment"] for t in pub["true_positives"]}
+        found_ours = {t["golden_comment"] for t in ours[url]["true_positives"]}
+        for g in records[url]["golden"]:
+            total += 1
+            same += (g["comment"] in found_pub) == (g["comment"] in found_ours)
+    agreement = same / total if total else float("nan")
+    f1_ours = summarize(per_pr({(u, 1): r for u, r in ours.items() if u in theirs}, profile))["f1"]
+    f1_pub = summarize(per_pr({(u, 1): r for u, r in theirs.items()}, profile))["f1"]
+    passed = len(theirs) == len(ours) > 0 and agreement >= 0.90 and abs(f1_ours - f1_pub) <= 0.03
+    lines = [
+        f"## Gate 1: {judge} on the stored `{tool}` reviews, profile {profile}",
+        "",
+        f"- PRs judged: {len(ours)} (published: {len(theirs)})",
+        f"- Golden comments with the same found / not found as the published {published}: "
+        f"{same} of {total} ({agreement:.1%}); needed 90%",
+        f"- F1: ours {f1_ours:.1%}, published {f1_pub:.1%} "
+        f"(difference {f1_ours - f1_pub:+.1%}; allowed ±3.0 points)",
+        "",
+        "**Pass.**" if passed else "**Fail.**",
+    ]
+    text = "\n".join(lines)
+    return text, passed
 
 
 async def repeat_check(jm: JudgeModel, n: int = 200, seed: int = 0) -> dict:

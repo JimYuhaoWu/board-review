@@ -164,6 +164,7 @@ def test_judge_run_board_and_code_review(tmp_path, monkeypatch):
     out = loop.run_until_complete(pipeline.judge_run(Run("d", "board-full", "p1", 1, bdir, {}), golden, FakeJudge()))
     rec = json.loads(out.read_text(encoding="utf-8"))
     assert [c["member"] for c in rec["candidates"]] == ["saboteur", "edge"]
+    assert rec["candidates"][0]["text"] == "`u.py:1`: SQL injection in search"  # the finding itself, not extracted
     assert score(rec, parse_view("board:full:cp"))["tp"] == 1
     assert score(rec, parse_view("board:edge:raw"))["tp"] == 0
     out = loop.run_until_complete(pipeline.judge_run(Run("d", "code-review", "p1", 1, cdir, {}), golden, FakeJudge()))
@@ -294,3 +295,44 @@ def test_board_groups_count_once():
     assert idx == [0, 1, 3]  # intent-1 (c2) is the second finding of G2, so it isn't posted
     idx, _ = select(rec, parse_view("board:intent:cp"))
     assert idx == [2]  # without edge, intent-1 represents G2
+
+
+def test_parse_code_review_text():
+    from eval.scoring.data import parse_code_review_text
+
+    text = """Reviewed `a..b` and found 3 issues.
+
+1. `shop/reports.py:5`: user_label still calls get_user(user_id) after the signature change.
+   Failure scenario: every call raises TypeError.
+2. `shop/users.py:11-12`: Pagination offset skips the first page.
+   Failure scenario: page 1 returns rows 21-40.
+**3.** `docs/README.md`: The README describes the old API.
+"""
+    assert parse_code_review_text(text) == [
+        {"file": "shop/reports.py", "line": 5, "summary": "user_label still calls get_user(user_id) after the signature change."},
+        {"file": "shop/users.py", "line": 11, "summary": "Pagination offset skips the first page."},
+        {"file": "docs/README.md", "line": None, "summary": "The README describes the old API."},
+    ]
+    assert parse_code_review_text("No issues found.") == []
+
+
+def test_gate1_agreement(tmp_path, monkeypatch):
+    from eval.scoring import gates
+
+    monkeypatch.setattr(gates, "RESULTS", tmp_path / "results")
+    martian = tmp_path / "martian"
+    (martian / "results" / "pub").mkdir(parents=True)
+    golden = [{"comment": "Injection in search", "severity": "High", "category": "security"},
+              {"comment": "Crash on empty list", "severity": "High", "category": "bug"}]
+    url = "https://github.com/o/r/pull/1"
+    data = {url: {"golden_comments": golden, "reviews": [
+        {"tool": "claude-code", "review_comments": [{"body": "- injection risk here\n- typo in a name"}]}]}}
+    (martian / "results" / "benchmark_data.json").write_text(json.dumps(data), encoding="utf-8")
+    pub = {url: {"claude-code": {
+        "true_positives": [{"golden_comment": "Injection in search", "category": "security"}],
+        "false_negatives": [{"golden_comment": "Crash on empty list", "category": "bug"}], "fp": 1}}}
+    (martian / "results" / "pub" / "evaluations.json").write_text(json.dumps(pub), encoding="utf-8")
+    asyncio.new_event_loop().run_until_complete(gates.judge_stored(FakeJudge(), martian, ["claude-code"]))
+    text, passed = gates.gate1_report("fake-model", "pub", martian)
+    assert passed, text
+    assert "2 of 2 (100.0%)" in text

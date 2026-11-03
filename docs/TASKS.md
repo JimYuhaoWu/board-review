@@ -31,7 +31,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<member-file-hash>.json 
 |---|---|---|
 | J1 | **The skill** (PLAN Phase 1): plugin, members, verifier, smoke test | ✅ first version, smoke-tested (see `eval/smoke/README.md`) |
 | J2 | **Scoring:** run Martian's extract, dedup, and judge steps unchanged; subset scoring (PLAN 6.2); metrics and the paired bootstrap. See `eval/scoring/README.md` | ✅ built and tested offline; reproduces Martian's published numbers. The live smoke check stopped at the endpoint quota, with the board's per-finding record still to judge |
-| J3 | **Judge gates:** Gate 1 with one paid published judge; Gate 1b for each local judge, including a repeat to test temperature-0 repeatability; a drift check at each judging session (re-judge a fixed sample of pairs), because the endpoint reports no model version. Pace calls for the shared endpoint (PLAN 5.1) | Gate 1b and the repeat check built (`gate1b`); first judge running overnight |
+| J3 | **Judge gates:** Gate 1 with one paid published judge; Gate 1b for each local judge, including a repeat to test temperature-0 repeatability; a drift check at each judging session (re-judge a fixed sample of pairs), because the endpoint reports no model version. Pace calls for the shared endpoint (PLAN 5.1) | `gate1` (Sonnet 4.5 on OpenRouter) and `gate1b` with the repeat check built; Gate 1 run 2026-11-03, Gate 1b for `deepseek-flash` overnight |
 | J4 | **Skill support for Phase 4b:** `model:` in member briefs, and `--verifier-model` | ☐, only if Y6 goes ahead |
 | — | Runs on account A (Phases 3–5), as assigned in PLAN 7.3 | later |
 
