@@ -105,6 +105,7 @@ How the user picks members:
   - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill is packaged as a plugin, and it shows up as `/board-review:review` (section 4).
   - `--safe-mode` doesn't work: it hides skills loaded through `--plugin-dir`.
   - `--bare` doesn't work: it accepts only an API key, not a plan login.
+  - The runner's `--setting-sources user` also keeps a benchmark repo's own `CLAUDE.md` out of the context (tested on 2.1.317 with a canary word; `AGENTS.md` isn't loaded either way). A reviewer can still open either file with a tool, and `/code-review` does look for `CLAUDE.md`. Two Martian PRs have one (`agent_files` in `prs.jsonl`).
 - A judge API key for an OpenAI-compatible endpoint, such as the Martian gateway or OpenRouter. It stays in a local `.env` and is never committed.
 - Allow Claude Code to run the benchmark's Python pipeline (MIT-licensed). Auto mode may block external code until a permission rule allows it.
 - On Windows, set `core.autocrlf=false` in every benchmark clone. Otherwise CRLF conversion makes whole files appear changed in the diff.
@@ -126,7 +127,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 4. **Survive usage limits.**
    - A run that stops at a usage limit is marked `failed: usage-limit`, never recorded as an empty review.
    - The runner stops for that account and resumes after the reset.
-   - Findings are cached per member, so a resumed run only re-runs the members that didn't finish.
+   - A board run is one `claude -p` call, so a resumed run re-runs the whole (variant, PR, repeat). Running the same command again skips finished runs.
 5. **Score every variant the same way.** Both variants report structured findings (the board's JSON; `/code-review`'s `ReportFindings` call). Each finding is rendered as its location plus its one-sentence statement and is one candidate, so findings keep their member and label for subset scoring. The board counts once per group of duplicates, as its report shows it. Martian's dedup and judge steps run unmodified. Martian's extraction step is skipped for structured findings, which are one issue each: on the smoke repo, extracting them one at a time split compound sentences into extra false positives. Martian's own whole-review extraction is scored too, as a check. Details in `eval/scoring/README.md`.
 6. **Score board runs three ways:** CONFIRMED only, CONFIRMED + PLAUSIBLE, and the raw union before adjudication.
 7. **Log for every run:** cost (`total_cost_usd`), wall time, tokens, which conditional members fired, the plan usage percentage before and after (section 7.2; only approximate if the account is used for other work at the same time), and the run metadata in section 6.4.

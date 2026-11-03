@@ -42,6 +42,8 @@ claude --version
 
   Never set `CLAUDE_CONFIG_DIR` permanently. It would replace your normal setup in every terminal. The harness sets it for each run.
 
+  **Windows:** without Git Bash, Claude Code offers a PowerShell tool instead of Bash, and the board's agents (`tools: Read, Grep, Glob, Bash`) get no shell at all. The runner sets `CLAUDE_CODE_GIT_BASH_PATH` to the `bash.exe` of the Git for Windows that provides `git`, and every run's setup check fails if Bash is missing.
+
 ## 2. Never set `ANTHROPIC_API_KEY` in the shell that runs the benchmark
 
 When `ANTHROPIC_API_KEY` is set, Claude Code bills the API key instead of your Pro or Team plan. Benchmark runs must use the plan.
