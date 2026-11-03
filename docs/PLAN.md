@@ -63,7 +63,7 @@ plugin/
     schema.json            member, verifier, and final output schemas
 ```
 
-Members run as the plugin agent `board-review:board-member`, and verifiers as `board-review:board-verifier`. Neither can edit files, even in an interactive session.
+Members run as the plugin agent `board-review:board-member`, and verifiers as `board-review:board-verifier`. Neither has the Edit or Write tool, but both have Bash, which can write files. So read-only rests on their instructions and on the session's permission prompts, not on the tool list. Benchmark runs enforce it with a read-only allowlist and `--permission-mode dontAsk` (Y4).
 
 How the user picks members:
 
@@ -79,7 +79,7 @@ How the user picks members:
 - **Reviewer model: Claude Sonnet 5.5 at `medium` effort, for every variant.** Sonnet 5.5 runs on both accounts within plan limits, while Fable runs on usage credits on both (section 7). In the ironbee raw-model results, Sonnet 5.5 tied for the top group at about half of Opus 5.5's cost. Higher effort did not raise Claude review scores there.
 - **Variants:**
   - **a:** built-in `/code-review medium --max-findings all <base>..<head>`.
-  - **c:** full board, `/board-review:review --members full --format json <base>..<head>`.
+  - **c:** full board, `/board-review:review --members full --max-findings 8 --format json <base>..<head>`. The per-member budget is passed explicitly, so a later change to the skill's default can't change the experiment.
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
 - **Judge:** Martian's extraction, dedup, and judge steps, unchanged. Judge models are called through an OpenAI-compatible endpoint, outside both plans.
   - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on a paid API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
@@ -163,6 +163,8 @@ Then score every subset of members offline (section 6.2).
 - **Wrongful refutation rate:** how often a REFUTED finding matches a real golden issue. This is the most important number for unattended use, because each case is a real bug the board discarded.
 - CONFIRMED precision must be clearly higher than PLAUSIBLE precision. If it isn't, the labels carry no information.
 
+**Check offline b against real b runs:** once the default board is chosen, run it for real (1 repeat) on the development PRs, and compare its CONFIRMED + PLAUSIBLE F1 with the offline estimate. If they differ by more than one bootstrap standard error, Phase 5 reports b from real runs on the test PRs too.
+
 Both collaborators sign off on the selected default board before anyone scores the test PRs.
 
 ### Phase 4b (optional): stronger models for selected roles
@@ -204,8 +206,9 @@ About 25 test PRs means only large differences will be significant. A secondary 
 | Phase 3, pilot on the other 9 PRs × 2 variants (kept as repeat 1) | 18 |
 | Phase 4, repeat 1 on the remaining 30 PRs × 2 variants | 60 |
 | Phase 4, repeat 2 on all 40 PRs × 2 variants | 80 |
-| **Total** | **~160**, plus judge calls |
-| Minimum option: 1 repeat only | ~80 |
+| Phase 4, real default-board runs on ~15 development PRs (check of offline b) | ~15 |
+| **Total** | **~175**, plus judge calls |
+| Minimum option: 1 repeat only, plus the b check | ~95 |
 | Optional: third repeat on test PRs | +50 |
 | Optional Phase 4b: 1–2 members × ~15 development PRs × 2 repeats, plus adjudication-only verifier runs | ~30–60 single-member runs, ~30 adjudication runs |
 
@@ -319,7 +322,7 @@ In Phase 3 step 2, record the session and weekly usage percentages shown by `/us
 
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
-If ~160 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~80 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
+If ~175 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~95 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
 
 ### 7.3 Splitting runs between accounts
 
@@ -375,6 +378,7 @@ board-review/
 - **Web applications only:** results on Martian don't transfer automatically to other fields. That is why domain datasets exist.
 - **Variable intent text:** the intent auditor depends on PR descriptions, and their quality varies.
 - **Few repeats:** 2 repeats make each comparison noisier, so only larger differences will be clear.
+- **Offline variant b keeps c's labels (Yara, review of PR #8).** Grouping and adjudication run over all members' findings. In a real b run, groups would be smaller, a group's severity could drop below the bar for a second verifier, and verifiers would see fewer co-findings. So offline b is exact for the raw union but only approximate for CONFIRMED and PLAUSIBLE. Phase 4 checks the size of this effect with real b runs on the development PRs.
 
 ## References
 
