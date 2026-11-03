@@ -2,7 +2,7 @@
 name: review
 description: Board review of a code change. Independent specialist reviewers (intent, edge cases, security, explain-back, plus optional concurrency, contracts, performance, and style) each read the change, then separate verifiers label every finding CONFIRMED, PLAUSIBLE, or REFUTED from evidence. Use after a long coding session or before merging, when the user asks for a board review.
 argument-hint: "[--members default|full|id,id] [--format markdown|json] [--intent text | --intent-file path] [target]"
-allowed-tools: Read Grep Glob Bash(git *) Bash(gh pr view *) Bash(gh pr diff *)
+allowed-tools: Read Grep Glob Bash(git diff *) Bash(git show *) Bash(git log *) Bash(git rev-parse *) Bash(git merge-base *) Bash(git status *) Bash(git grep *) Bash(git blame *) Bash(git ls-files *) Bash(gh pr view *) Bash(gh pr diff *)
 ---
 
 # Board review
@@ -98,7 +98,7 @@ Nothing else goes in the prompt.
 
 ## 6. Collect and group
 
-Each member returns one JSON object (`member_output`). If a member's output isn't valid JSON, or the member failed, record it under `failed_members` with the reason, and continue without it.
+Each member returns one JSON object (`member_output`). If a member's output isn't valid JSON, or the member failed, record it under `members.failed` with the reason, and continue without it.
 
 Give every finding an id `<member>-<n>`. Then group findings that describe the **same root cause at the same place**, even if worded differently. Each group gets an id `G1`, `G2`, and so on. Keep every finding; grouping never deletes one. A group's severity is the highest among its findings.
 
@@ -134,7 +134,7 @@ A verifier that fails or returns invalid output counts as PLAUSIBLE for its grou
 
 ### `--format json`
 
-Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones.
+Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones. Set `members.roster` to `default`, `full`, or `custom`.
 
 Keep the JSON compact: no indentation, and copy each field as the member or verifier wrote it. Keep the whole object under about 30,000 characters. If it would be longer, shorten `evidence` fields to their first sentence, starting with REFUTED findings. Never drop a finding.
 

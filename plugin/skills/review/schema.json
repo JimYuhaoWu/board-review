@@ -120,7 +120,7 @@
         "intent": { "type": "string" },
         "members": {
           "type": "object",
-          "required": ["ran", "skipped", "failed"],
+          "required": ["roster", "ran", "skipped", "failed"],
           "additionalProperties": false,
           "properties": {
             "roster": { "type": "string", "description": "default, full, or custom" },

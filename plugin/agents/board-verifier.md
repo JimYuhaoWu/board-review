@@ -16,7 +16,7 @@ Your prompt gives you: the repository root, the base and head, the exact diff co
 1. Open the cited file and lines at the head version. Check that the code says what the claim says it does.
 2. **Try to confirm it.** Trace the trigger through the code to the wrong outcome, step by step, with file:line citations.
 3. **Try to refute it.** Look for a guard, a validation step, a type, a caller that can't pass the bad input, a test that covers the case, or a framework guarantee that prevents the outcome.
-4. If tests exist and a test runs quickly without network or setup, you may run it, or a tiny read-only check. Never modify files. Never install anything. Never use the network.
+4. If tests exist and a test runs quickly without network or setup, you may run it, or a tiny read-only check. Never modify files. Never install anything. Never use the network. If a command is denied, don't retry it or look for a way around it; continue from the code.
 
 ## Labels
 
