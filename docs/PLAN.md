@@ -80,6 +80,7 @@ How the user picks members:
 - **Variants:**
   - **a:** built-in `/code-review medium --max-findings all <base>..<head>`.
   - **c:** full board, `/board-review:review --members full --max-findings 8 --format json <base>..<head>`. The per-member budget is passed explicitly, so a later change to the skill's default can't change the experiment.
+  - **Intent:** both variants get the same text, the PR's title and description from `prs.jsonl`, as Martian's published tools did. The board gets it with `--intent-file` (a file, because PR descriptions can contain `--flags`). `/code-review` gets it as text after the target, if a smoke-repo test shows that this doesn't change what it reviews; otherwise neither variant gets it, and both see only commit messages (Yara, review of PR #8).
   - **b:** default board. **Not run separately.** It is computed offline from variant c's findings, because members are independent.
 - **Judge:** Martian's extraction, dedup, and judge steps, unchanged. Judge models are called through an OpenAI-compatible endpoint, outside both plans.
   - **Running the judges inside the plans was investigated and rejected (Yara, 2026-11-03).** Martian's judge makes one small call per pair of golden comment and candidate, about 14 pairs per review in its stored results. This project needs about 9,500–26,000 judge calls, roughly $50–100 on a paid API, mostly for the final panel. Routing those calls through `claude -p` can't set temperature 0, can't run GPT-5.2, and uses a lot of plan usage. Batching many pairs into one call would change Martian's method and need its own validation.
@@ -363,6 +364,7 @@ board-review/
 - Development judge: `deepseek-flash` on account A's free local endpoint, subject to Gate 1b.
 - Final judge panel: the 3 local models (free). The paid published judges are the backup (5.1).
 - Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
+- Intent: both variants get the PR title and description (5.1), with "neither" as the fallback.
 - Pinned Claude Code version: 2.1.317 on both machines.
 
 - Work split: see [TASKS.md](TASKS.md). Account A's side builds the skill, scoring, and judge gates. Yara builds the data pipeline, the split, and the runner, and owns the optional Phase 4b.
