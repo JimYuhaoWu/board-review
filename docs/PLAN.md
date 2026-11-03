@@ -78,17 +78,17 @@ How the user picks members:
   - **Judge choice moves scores.** Martian's three judges agree on 95% of golden comments (Cohen's κ ≈ 0.90), yet Claude Code's published F1 ranges from 39% (Sonnet 4.5) to 49% (Opus 4.5). Scores are only ever compared under the same judge.
   - **Free local endpoint.** Account A has free access to an institutional OpenAI-compatible endpoint, reachable from the institution's network. It serves DeepSeek V4.1 Flash (`deepseek-flash`), GLM 5.3 Flash (`glm-flash`), and Qwen 3.8 Flash-Next (`Qwen`). The address and key stay in account A's local `.env`. The key is personal, so all judging runs on account A's machine.
   - **Development judge:** `deepseek-flash` on the local endpoint, if it passes Gate 1b. A non-Claude judge also avoids Claude grading Claude.
-  - **Final panel** (open decision, section 10). 3 judges from different model families; 2 of 3 must agree.
-    - Option 1, free: the 3 local models (DeepSeek, GLM, Qwen). Valid for comparing a, b, and c. The scores can't be compared with the published leaderboard.
-    - Option 2, paid: Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, the judges of the published results, through a multi-model provider such as OpenRouter. About $50–100. The scores can be compared with the leaderboard.
+  - **Final panel:** 3 judges from different model families; 2 of 3 must agree.
+    - **Chosen, free:** the 3 local models (DeepSeek, GLM, Qwen). Valid for comparing a, b, and c. The scores can't be compared with the published leaderboard.
+    - **Backup, paid:** Claude Opus 4.5, Claude Sonnet 4.5, and GPT-5.2, the judges of the published results, through a multi-model provider such as OpenRouter. About $50–100. Used if a local judge fails Gate 1b and no other local model can replace it, if the local endpoint becomes unavailable, or if leaderboard-comparable scores are needed.
   - **Rules for the local endpoint.**
     - Log the served model version with every judge call. The models change without notice, so judge each comparison within one short window, and re-judge everything if the version changes.
     - No quotas are published, and the endpoint is shared. Keep concurrency low and back off on errors.
-    - Temperature 0 must work; the key test checks it.
+    - Key test (2026-11-03): all 3 models answered a judge-style prompt with valid JSON, with `temperature: 0` accepted, in 0.7–2.5 s. The response reports only the alias (`deepseek-flash`, `glm-flash`, `Qwen`), not the version, so the harness records the version from the provider's model list at each judging session. Whether temperature 0 gives repeatable verdicts is checked in Gate 1b by judging the same pairs twice.
 
 ### Phase 0: setup
 
-- **One pinned Claude Code version on both machines**, 2.1.288 or later, which `--max-findings` needs. Install it as a standalone CLI with `claude install <version>`, log it in to the account's plan, and set `DISABLE_AUTOUPDATER=1`. Don't run benchmarks with the copy bundled in the desktop app: it updates with the app and isn't logged in when run on its own.
+- **One pinned Claude Code version on both machines: 2.1.317.** It must be 2.1.288 or later, which `--max-findings` needs. Install it as a standalone CLI with `claude install <version>`, log it in to the account's plan, and set `DISABLE_AUTOUPDATER=1`. Don't run benchmarks with the copy bundled in the desktop app: it updates with the app and isn't logged in when run on its own.
 - **A clean Claude Code setup for benchmark runs**, the same on both machines. A personal setup (user CLAUDE.md, auto-memory, hooks, MCP servers, plugins, skills) changes what the reviewer writes and adds usage to every run. Tested on 2.1.309:
   - **Use:** a dedicated, empty config directory (`CLAUDE_CONFIG_DIR`, logged in once), plus `--plugin-dir` to load the board-review skill from this repo. The user's skills are gone and the built-in `/code-review` stays. The skill must be packaged as a plugin, and it then shows up as `<plugin>:board-review`.
   - `--safe-mode` doesn't work: it hides skills loaded through `--plugin-dir`.
@@ -330,13 +330,14 @@ board-review/
 - Usage ceiling: at most 50% of each account's weekly limit, unless both collaborators agree otherwise.
 - Judges: Martian's extraction, dedup, and judge steps, unchanged, called through an OpenAI-compatible endpoint (5.1).
 - Development judge: `deepseek-flash` on account A's free local endpoint, subject to Gate 1b.
+- Final judge panel: the 3 local models (free). The paid published judges are the backup (5.1).
+- Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
+- Pinned Claude Code version: 2.1.317 on both machines.
 
 **Open:**
 
-1. **Final judge panel:** free local panel (option 1) or the paid published judges (option 2); see 5.1. Recommendation: option 1, because the project compares a, b, and c with each other, not with the leaderboard. Gate 1 needs a few dollars of paid judging either way.
-2. **Gate 2 metric:** board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal), CONFIRMED only, or the raw union.
-3. **Pinned Claude Code version** for both machines. Account A runs 2.1.317; Yara tested the clean setup on 2.1.309.
-4. **Who builds which part** of Phases 1 and 2.
+1. **Who builds which part** of Phases 1 and 2.
+2. **Gate 1's paid judge:** which published judge and provider to use for the one-off check (a few dollars).
 
 ## 11. Known limits
 

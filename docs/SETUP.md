@@ -4,10 +4,10 @@ Each collaborator completes this checklist on their own machine. Then tick your 
 
 ## 1. One pinned Claude Code version, with a clean setup
 
-See PLAN Phase 0 for the reasons. Both machines must run the **same version**, 2.1.288 or later, from Phase 2 until Phase 5 is done. The version is agreed in PLAN section 10.
+See PLAN Phase 0 for the reasons. Both machines run **Claude Code 2.1.317** from Phase 2 until Phase 5 is done (PLAN section 10).
 
 ```bash
-claude install <version>     # standalone CLI, not the desktop app's bundled copy
+claude install 2.1.317       # standalone CLI, not the desktop app's bundled copy
 claude --version
 ```
 
@@ -125,5 +125,5 @@ The Martian benchmark is pinned in [`eval/datasets/martian/SOURCE.md`](../eval/d
 | 2. `ANTHROPIC_API_KEY` not set | ✅ | ☐ |
 | 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ☐ |
 | 4. Git line endings | handled by the harness | handled by the harness |
-| 5. Judge key in `.env` | ☐ (local endpoint key) | not needed |
+| 5. Judge key in `.env` | ✅ local endpoint, all 3 models tested | not needed |
 | 6. Pipeline permission | ✅ (project rule, shared) | ✅ (comes with the repo) |
