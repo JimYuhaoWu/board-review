@@ -10,7 +10,7 @@ import asyncio
 import statistics
 from dataclasses import dataclass
 
-from .data import default_roster
+from .data import default_roster, representatives
 from .martian import step3_judge_comments as m3
 from .pipeline import WHOLE
 
@@ -48,12 +48,22 @@ def parse_view(spec: str) -> View:
 
 
 def select(record: dict, view: View) -> tuple[list[int], list[list[int]] | None]:
-    """Indices of the view's candidates, and the run's dedup groups restricted to them."""
+    """Indices of the view's candidates, and the run's dedup groups restricted to them.
+
+    For the board, only each group's representative finding counts: the first finding of
+    the group among the view's members, as the board's report shows one item per group.
+    """
+    in_view = [
+        f for f in record.get("findings", [])
+        if (view.members is None or f["member"] in view.members) and (view.labels is None or f["label"] in view.labels)
+    ]
+    kept = {f["id"] for f in representatives(in_view)}
     idx = [
         i
         for i, c in enumerate(record["candidates"])
         if (view.members is None or c["member"] in view.members)
         and (view.labels is None or c["label"] in view.labels)
+        and (c["finding"] is None or c["finding"] in kept)
     ]
     groups = record["groups"]
     if groups is None:

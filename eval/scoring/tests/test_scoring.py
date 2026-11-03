@@ -56,7 +56,7 @@ def _record():
     ]
     return {"golden": golden, "candidates": cands, "groups": [[0, 4], [1, 2], [3]], "verdicts": verdicts,
             "pr_id": "p1", "repeat": 1, "dedup_fallback": False,
-            "findings": [{"id": c["finding"], "label": c["label"]} for c in cands]}
+            "findings": [{"id": c["finding"], "member": c["member"], "label": c["label"], "group": None} for c in cands]}
 
 
 class _TableJudge:
@@ -284,3 +284,13 @@ def test_gate1b_end_to_end(tmp_path, monkeypatch):
     text, passed = gates.gate1b_report("fake-model", martian, list(said))
     assert passed, text
     assert "fake-model vs claude-opus-4-5-20251101: +1.00" in text
+
+
+def test_board_groups_count_once():
+    rec = _record()
+    for f, g in zip(rec["findings"], ["G1", "G2", "G2", "G3", "G4"]):
+        f["group"] = g  # edge-1 and intent-1 are one group, as the board reports it
+    idx, _ = select(rec, parse_view("board:full:cp"))
+    assert idx == [0, 1, 3]  # intent-1 (c2) is the second finding of G2, so it isn't posted
+    idx, _ = select(rec, parse_view("board:intent:cp"))
+    assert idx == [2]  # without edge, intent-1 represents G2

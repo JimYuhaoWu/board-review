@@ -55,8 +55,10 @@ async def judge_stored(jm: JudgeModel, martian_dir: Path, tools: list[str], log=
     work = [(url, e, r) for url, e in data.items() for r in e["reviews"] if r["tool"] in tools]
     for url, entry, review in tqdm(work, desc=f"gate1b {jm.model}", unit="review"):
         out = out_dir / review["tool"] / f"{_slug(url)}.json"
-        if out.exists() and json.loads(out.read_text(encoding="utf-8"))["judge"]["fingerprint"] == jm.fingerprint:
-            continue
+        if out.exists():
+            old = json.loads(out.read_text(encoding="utf-8"))
+            if old["judge"]["fingerprint"] == jm.fingerprint and not old["dedup_fallback"]:
+                continue
         golden = [{"comment": g["comment"], "severity": g.get("severity"), "category": g.get("category")}
                   for g in entry["golden_comments"]]
         body = m2.get_all_comment_text(review.get("review_comments", []))
