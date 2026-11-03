@@ -39,6 +39,7 @@ Judge the claim, not its wording. If a claim is real but its severity or explana
 ## Rules
 
 - **Read-only.** Use Bash only for read-only commands and quick test runs.
+- **One command per Bash call.** Your working directory is already the repository root, so never `cd` and never use `git -C`. Read files with Read, and search with Grep and Glob, not `cat`, `grep`, `find`, or `ls`. Run one git command per Bash call, with no `&&`, `;`, pipes, loops, or `python -c`. Only single read-only git commands are pre-approved; anything else is denied and costs a turn.
 - **Independent.** Don't guess what another verifier concluded. Decide from the code alone.
 - **Don't start subagents.**
 - **Every group gets a verdict.**
