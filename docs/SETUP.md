@@ -19,7 +19,28 @@ claude --version
   claude          # log in, then exit
   ```
 
-  The harness loads the board-review skill with `--plugin-dir`. Your own skills, memory, hooks, and MCP servers stay out of the runs.
+  Then replace `settings.json` in that folder (`$HOME/.claude-bench/settings.json`) with:
+
+  ```json
+  {
+    "autoMemoryEnabled": false,
+    "syncClaudeAiSkills": false,
+    "syncClaudeAiPlugins": false,
+    "disableClaudeAiConnectors": true,
+    "env": { "DISABLE_AUTOUPDATER": "1" }
+  }
+  ```
+
+  An empty folder isn't enough on its own. Your claude.ai account can bring things into it:
+  - **Skills and plugins enabled on claude.ai** sync into the folder while Claude Code runs. They differ between the two accounts, so runs would no longer match.
+  - **claude.ai connectors**, such as Google Drive, would load as MCP servers.
+  - **Auto-memory** would carry notes from one review run into the next.
+
+  The `env` line keeps the version pinned, even in a shell where `DISABLE_AUTOUPDATER` isn't set.
+
+  The harness loads the board-review skill with `--plugin-dir`. Your own skills, memory, hooks, and MCP servers stay out of the runs. Don't install anything in this folder.
+
+  Never set `CLAUDE_CONFIG_DIR` permanently. It would replace your normal setup in every terminal. The harness sets it for each run.
 
 ## 2. Never set `ANTHROPIC_API_KEY` in the shell that runs the benchmark
 
@@ -121,7 +142,7 @@ The Martian benchmark is pinned in [`eval/datasets/martian/SOURCE.md`](../eval/d
 
 | Step | Account A (Pro) | Account B (Team Standard) |
 |---|---|---|
-| 1. Pinned version, clean setup | 2.1.317 installed; pin and clean config dir ☐ | ☐ |
+| 1. Pinned version, clean setup | ✅ 2.1.317, auto-update off, clean folder logged in (Pro) | ☐ |
 | 2. `ANTHROPIC_API_KEY` not set | ✅ | ☐ |
 | 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ☐ |
 | 4. Git line endings | handled by the harness | handled by the harness |
