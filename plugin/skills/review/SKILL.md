@@ -13,6 +13,7 @@ Hard rules for the whole run:
 
 - **Read-only.** Never edit, create, or delete files. Never commit, push, or post comments.
 - **No network** except `gh pr view` and `gh pr diff` when the target is a pull request.
+- **One command per Bash call.** Read files with the Read tool, not `cat` or `head`, and run one git command per Bash call, without `cd` or `&&`. Only single read-only commands are pre-approved, so a chained command is denied and costs a turn.
 - **Independence.** Members and verifiers get only what this file says to give them. Never pass them this conversation's history, your own opinion of the code, or another member's findings.
 - **No fixes.** This skill reports. Fixing is a separate request from the user.
 
