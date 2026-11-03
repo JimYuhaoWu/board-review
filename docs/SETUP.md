@@ -142,9 +142,9 @@ The Martian benchmark is pinned in [`eval/datasets/martian/SOURCE.md`](../eval/d
 
 | Step | Account A (Pro) | Account B (Team Standard) |
 |---|---|---|
-| 1. Pinned version, clean setup | ✅ 2.1.317, auto-update off, clean folder logged in (Pro) | ☐ |
-| 2. `ANTHROPIC_API_KEY` not set | ✅ | ☐ |
-| 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ☐ |
+| 1. Pinned version, clean setup | ✅ 2.1.317, auto-update off, clean folder logged in (Pro) | ✅ 2.1.317, auto-update off, clean folder logged in (Team) |
+| 2. `ANTHROPIC_API_KEY` not set | ✅ | ✅ |
+| 3. Python ≥ 3.11 and uv | ✅ Python 3.14.5, uv 0.13.7 | ✅ Python 3.14.10, uv 0.13.7 |
 | 4. Git line endings | handled by the harness | handled by the harness |
 | 5. Judge key in `.env` | ✅ local endpoint, all 3 models tested | not needed |
 | 6. Pipeline permission | ✅ (project rule, shared) | ✅ (comes with the repo) |
