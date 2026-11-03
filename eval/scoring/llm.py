@@ -79,6 +79,18 @@ class Cache:
         self.db.commit()
 
 
+# Judges named `<provider>:<model id>` use that provider; a bare name uses MARTIAN_BASE_URL and
+# MARTIAN_API_KEY from .env (the local endpoint). `fingerprint_keys` picks the model-list fields
+# that identify the model: OpenRouter's entries also carry prices and descriptions, which change.
+PROVIDERS = {
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "key_env": "OPENROUTER_API_KEY",
+        "fingerprint_keys": ("id", "canonical_slug", "created"),
+    },
+}
+
+
 class JudgeModel:
     """One judge model on an OpenAI-compatible endpoint: extraction, dedup, and judging."""
 
@@ -88,16 +100,25 @@ class JudgeModel:
         """`rate` is the most calls started per minute; `max_wait` is the longest total pause, in
         seconds, before giving up on a busy or unreachable endpoint."""
         load_env()
+        prefix, _, rest = model.partition(":")
+        self.provider = PROVIDERS.get(prefix) if rest else None
+        self.model_id = rest if self.provider else model
         with redirect_stdout(StringIO()):  # Martian's constructors print the endpoint
             self.extractor = m2.CandidateExtractor()
             self.deduper = m25.DedupLLM()
             self.judge = m3.LLMJudge()
         for client in (self.extractor, self.deduper, self.judge):
-            client.model = model
+            client.model = self.model_id
             # Martian's functions do their own retries; the SDK's hidden ones would only spend quota.
-            client.client = client.client.with_options(max_retries=0)
+            if self.provider:
+                key = os.environ.get(self.provider["key_env"])
+                if not key:
+                    raise LLMError(f"{self.provider['key_env']} is not set (.env)")
+                client.client = openai.AsyncOpenAI(api_key=key, base_url=self.provider["base_url"], max_retries=0)
+            else:
+                client.client = client.client.with_options(max_retries=0)
             self._flag_busy(client.client)
-        self.model = model
+        self.model = model  # the full name, with any provider prefix, keys the cache
         self.cache = cache or Cache()
         self.sem = asyncio.Semaphore(concurrency)
         self.fingerprint = "unset"
@@ -176,11 +197,13 @@ class JudgeModel:
                 raise EndpointBusy(f"{type(e).__name__}: {e}") from None
 
         page = await self._call(listing)
-        entry = next((m.model_dump() for m in page.data if m.id == self.model), None)
+        entry = next((m.model_dump() for m in page.data if m.id == self.model_id), None)
         if entry is None:
             raise LLMError(f"{self.model} is not in the endpoint's model list")
         self.served = entry
-        self.fingerprint = _sha(json.dumps(entry, sort_keys=True))[:12]
+        keys = self.provider["fingerprint_keys"] if self.provider else None
+        identity = {k: entry.get(k) for k in keys} if keys else entry
+        self.fingerprint = _sha(json.dumps(identity, sort_keys=True))[:12]
         return entry
 
     async def _cached(self, step: str, prompt: str, call):

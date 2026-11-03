@@ -195,6 +195,32 @@ def cmd_subsets(args) -> None:
                                          if c else "none meets the precision floor"))
 
 
+async def cmd_gate1(args) -> None:
+    from .gates import gate1_report, judge_stored
+
+    martian = Path(args.martian_dir or os.environ.get("MARTIAN_DIR", ""))
+    if not (martian / "results" / "benchmark_data.json").exists():
+        sys.exit("Point --martian-dir (or MARTIAN_DIR) at the pinned Martian clone's offline/ folder.")
+    if not args.report_only:
+        jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
+                        log=tqdm.write)
+        try:
+            served = await jm.identify()
+            print(f"judge {args.judge}: fingerprint {jm.fingerprint}, served {served.get('canonical_slug') or served.get('id')}")
+            await judge_stored(jm, martian, [args.tool])
+        except EndpointUnavailable as e:
+            print(f"STOPPED: {e}")
+            print(f"{jm.calls} calls this session. Finished calls are cached; re-run to continue.")
+            return
+        print(f"done: {jm.calls} calls this session")
+    text, _ = gate1_report(args.judge, args.published, martian, args.tool, args.profile)
+    print(text)
+    report = ROOT / "eval" / "reports" / f"gate1-{judge_slug(args.judge)}.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(text + "\n", encoding="utf-8")
+    print(f"\nWritten to {report.relative_to(ROOT)}")
+
+
 async def cmd_gate1b(args) -> None:
     from .gates import gate1b_report, judge_stored, repeat_check
 
@@ -264,6 +290,17 @@ def main() -> None:
     g.add_argument("--concurrency", type=int, default=1, help="calls in flight at once")
     g.add_argument("--rate", type=float, default=10.0, help="most calls started per minute")
     g.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy or unreachable endpoint")
+    g1 = sub.add_parser("gate1", help="our pipeline vs a published judge's verdicts (PLAN Phase 3)")
+    g1.add_argument("--judge", required=True, help="for example openrouter:anthropic/claude-sonnet-4.5")
+    g1.add_argument("--published", default="anthropic_claude-sonnet-4-5-20250929",
+                    help="Martian results folder of the same judge")
+    g1.add_argument("--tool", default="claude-code")
+    g1.add_argument("--martian-dir", help="the pinned Martian clone's offline/ folder (or set MARTIAN_DIR)")
+    g1.add_argument("--report-only", action="store_true", help="score existing records; no calls")
+    g1.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    g1.add_argument("--concurrency", type=int, default=4, help="calls in flight at once")
+    g1.add_argument("--rate", type=float, default=60.0, help="most calls started per minute")
+    g1.add_argument("--max-wait", type=float, default=30, help="minutes to wait out a busy or unreachable endpoint")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
@@ -271,6 +308,8 @@ def main() -> None:
         asyncio.run(cmd_judge(args))
     elif args.cmd == "gate1b":
         asyncio.run(cmd_gate1b(args))
+    elif args.cmd == "gate1":
+        asyncio.run(cmd_gate1(args))
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets}[args.cmd](args)
 

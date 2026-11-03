@@ -1,6 +1,7 @@
 """Read datasets and run results in the layout of docs/TASKS.md."""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -115,9 +116,25 @@ def _report_findings(stream: Path) -> list[dict] | None:
     return accepted
 
 
+# `/code-review` at `medium` doesn't call ReportFindings; its reply lists findings as
+# ``N. `file:line`: one-sentence summary``, each followed by a "Failure scenario:" line.
+_CR_ITEM = re.compile(r"^\s*(?:\*\*)?(\d+)[.)](?:\*\*)?\s+`([^`]+)`\s*[:—-]?\s*(.+?)\s*$", re.M)
+
+
+def parse_code_review_text(text: str) -> list[dict]:
+    """Findings from `/code-review`'s text reply, as {file, line, summary}; [] if none match."""
+    found = []
+    for m in _CR_ITEM.finditer(text):
+        location, summary = m.group(2), m.group(3)
+        path, _, rest = location.partition(":")
+        line = re.match(r"\d+", rest)
+        found.append({"file": path, "line": int(line.group()) if line else None, "summary": summary})
+    return found
+
+
 def review_findings(run: Run) -> list[dict] | None:
     """A run's findings as {id, member, label, group, file, line, text}; None when `/code-review`
-    reported no structured findings (then its text reply is scored whole).
+    gave neither structured findings nor a parsable list (then its text reply is extracted whole).
 
     `text` is the finding's one-sentence statement: the board's `claim`, `/code-review`'s
     `summary`. Evidence, failure scenarios, and fixes are left out for both, so neither
@@ -125,6 +142,8 @@ def review_findings(run: Run) -> list[dict] | None:
     """
     if run.variant == "code-review":
         found = _report_findings(run.path / "stream.jsonl") if (run.path / "stream.jsonl").exists() else None
+        if found is None and (run.path / "final.md").exists():
+            found = parse_code_review_text((run.path / "final.md").read_text(encoding="utf-8")) or None
         if found is None:
             return None
         return [
