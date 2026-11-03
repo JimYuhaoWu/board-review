@@ -136,9 +136,9 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 
 **Step 1, freeze the split.** Before any results are scored, split the runnable PRs into 15 development PRs and 30 test PRs, 3 development PRs per repo, with a recorded seed. The split also fixes the 10 pilot PRs. It is in `eval/datasets/martian/split.json` and never changed.
 
-**Step 2, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once, while nothing else uses the account. `/usage` counts all work on the account, so other work would inflate the numbers. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats and the account split. These 2 runs also count as that PR's pilot runs.
+**Step 2, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once, while nothing else uses the account. `/usage` counts all work on the account, so other work would inflate the numbers. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats. These 2 runs also count as that PR's pilot runs.
 
-**Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. All 10 run on account B (Yara, 2026-11-03), so step 2 measures account B only; account A is measured before its first Phase 4 runs. Two gates:
+**Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. All 10 run on account B (Yara, 2026-11-03), so step 2 measures account B only. Two gates:
 
 - **Gate 1, judge sanity:** re-judge the stored `claude-code` row with one of the published judges, and compare the result with that judge's published score. This checks our copy of the judge pipeline. It needs about 700 judge calls (50 reviews × ~14 pairs), a few dollars on a paid API.
   - **Judge:** Claude Sonnet 4.5 through OpenRouter (`openrouter:anthropic/claude-sonnet-4.5`, snapshot 2025-09-29, the same as Martian's), about $2.
@@ -338,10 +338,10 @@ Proposed ceiling: the experiment uses at most **50% of each account's weekly lim
 
 If ~195 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~105 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
 
-### 7.3 Splitting runs between accounts
+### 7.3 Which account runs what
 
-- **Split by PR, not by variant.** Each account runs both variants for its assigned PRs, so a and c on the same PR share one machine and one environment.
-- **Assign PRs about 5 : 4 (B : A)**, matching the 1.25× ratio. Rebalance after the usage measurement.
+- **Account B runs every review** (decided 2026-11-03, after the pilot). The ~175 remaining runs need about 15 weekly points on account B (section 7.2), well inside its ceiling, so the planned 5 : 4 split by PR is dropped. All runs then share one machine and one environment, which also removes the account as a source of variation.
+- **Account A judges only.** It receives the runs as zips (section 9) and runs every judge.
 - **Schedule runs across 5-hour sessions** and spread them over the weekly resets, preferably at times the account isn't needed for other work.
 
 ## 8. Repository layout (target)
@@ -372,7 +372,7 @@ board-review/
 **Settled:**
 
 - Reviewer model: Claude Sonnet 5.5 at `medium` effort, for every variant.
-- Accounts: A (Pro) and B (Team Standard), runs split by PR at about 5 : 4 (B : A).
+- Accounts: A (Pro) and B (Team Standard). Account B runs every review; account A judges (2026-11-03, after the pilot).
 - Usage ceiling: at most 50% of each account's weekly limit, unless both collaborators agree otherwise.
 - Judges: Martian's extraction, dedup, and judge steps, unchanged, called through an OpenAI-compatible endpoint (5.1).
 - Development judge: `deepseek-flash` on account A's free local endpoint, subject to Gate 1b.
