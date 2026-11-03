@@ -379,7 +379,9 @@ def _finish(meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out
         meta.status, meta.detail = "failed:usage-limit", result.text[:300]
         return
     if result.is_error:
-        meta.status, meta.detail = f"failed:{result.subtype or 'error'}", result.text[:300]
+        # An API error can still report subtype "success"; terminal_reason says what happened.
+        reason = result.terminal_reason or (result.subtype if result.subtype != "success" else "") or "error"
+        meta.status, meta.detail = f"failed:{reason}", result.text[:300]
         return
     if spec.variant == "code-review":
         (out / "final.md").write_text(result.text, encoding="utf-8", newline="\n")

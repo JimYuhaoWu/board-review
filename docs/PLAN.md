@@ -138,7 +138,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
 
 **Step 2, measure usage (2 runs).** On the largest pilot PR, run variant a once and variant c once, while nothing else uses the account. `/usage` counts all work on the account, so other work would inflate the numbers. Record session and weekly usage before and after each run (section 7.2). This decides the number of repeats and the account split. These 2 runs also count as that PR's pilot runs.
 
-**Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. Two gates:
+**Step 3, pilot.** 10 development PRs (2 per repo), including the PR from step 2, variants a and c, 1 repeat. The pilot runs are kept as repeat 1 for those PRs. All 10 run on account B (Yara, 2026-11-03), so step 2 measures account B only; account A is measured before its first Phase 4 runs. Two gates:
 
 - **Gate 1, judge sanity:** re-judge the stored `claude-code` row with one of the published judges, and compare the result with that judge's published score. This checks our copy of the judge pipeline. It needs about 700 judge calls (50 reviews × ~14 pairs), a few dollars on a paid API.
   - **Judge:** Claude Sonnet 4.5 through OpenRouter (`openrouter:anthropic/claude-sonnet-4.5`, snapshot 2025-09-29, the same as Martian's), about $2.
@@ -332,6 +332,8 @@ In Phase 3 step 2, record the session and weekly usage percentages shown by `/us
 
 > runs per week per account ≈ (weekly % the experiment may use) ÷ (weekly % per run)
 
+**Result, account B (2026-11-03).** The pilot's 20 runs cost $8.16 API-equivalent: $0.07 per `/code-review` run and $0.74 per board run. About $10.7 of work moved the session meter 13 points and the weekly meter about 2 points. So on account B one weekly point is about $5 (between $3.50 and $10, because `/usage` shows whole percents), and a 5-hour session holds about $80. One PR with both variants is about 0.15 weekly points. The remaining ~175 runs need about 15 weekly points (7–20), even if account B runs all of them.
+
 Proposed ceiling: the experiment uses at most **50% of each account's weekly limit**. The rest stays free for daily work.
 
 If ~195 runs don't fit within about 3 weekly resets under that ceiling, fall back to the minimum option (~105 runs). If even that doesn't fit, reduce the PR count. Check with both collaborators before using usage credits. Account B can also move from a Standard to a Premium seat; discuss this if the pilot looks promising.
@@ -363,6 +365,7 @@ board-review/
 - Commit summaries and reports; keep raw run output out of git.
 - Never commit API keys or `.env` files.
 - Raw results from the two accounts are merged through the shared cache format (section 6.2), not by hand.
+- Results reach the judging machine (account A) as one zip per batch: `uv run python -m eval.runner pack --variant both --set pilot --repeat 1` on the running machine, sent by its owner, and extracted at the repo root with `uv run python -m zipfile -e <zip> .`. The zip holds the finished runs only, with a manifest.
 
 ## 10. Decisions
 
