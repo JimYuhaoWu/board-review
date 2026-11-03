@@ -193,32 +193,94 @@ def test_member_label_and_selection():
     assert out["best"]["f1"] == 1.0 and out["chosen"]["members"] == ("saboteur", "edge")
 
 
-def test_quota_stops_without_retries(tmp_path, monkeypatch):
+def _fake_endpoint(jm, outcomes):
+    """Point jm's judge client at a fake whose calls follow `outcomes`: 'busy', 'down', or 'ok'."""
     import httpx2 as httpx
     import openai
 
-    from eval.scoring.llm import Cache, JudgeModel, QuotaStop
-
-    monkeypatch.setenv("MARTIAN_API_KEY", "test")
-    monkeypatch.setenv("MARTIAN_BASE_URL", "http://127.0.0.1:9/v1")
-    jm = JudgeModel("m", cache=Cache(tmp_path / "c.sqlite"))
-    assert jm.judge.client.max_retries == 0
     calls = []
+    request = httpx.Request("POST", "http://x")
 
     class Completions:
         async def create(self, **kwargs):
-            calls.append(kwargs)
-            raise openai.RateLimitError("429 quota", response=httpx.Response(429, request=httpx.Request("POST", "http://x")), body=None)
+            outcome = outcomes[min(len(calls), len(outcomes) - 1)]
+            calls.append(outcome)
+            if outcome == "busy":
+                raise openai.RateLimitError("429 queue", response=httpx.Response(429, request=request), body=None)
+            if outcome == "down":
+                raise openai.APIConnectionError(request=request)
+            msg = type("M", (), {"content": '{"reasoning": "r", "match": true, "confidence": 0.9}'})()
+            return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
 
     fake = type("Client", (), {})()
     fake.chat = type("Chat", (), {})()
     fake.chat.completions = Completions()
-    jm._stop_on_quota(fake)
+    jm._flag_busy(fake)
     jm.judge.client = fake
-    loop = asyncio.new_event_loop()
-    with pytest.raises(QuotaStop):
-        loop.run_until_complete(jm.match("golden", "candidate"))
-    assert len(calls) == 1  # Martian's retry loop never ran
-    with pytest.raises(QuotaStop):
-        loop.run_until_complete(jm.extract("a comment long enough to be extracted"))
-    assert len(calls) == 1  # later calls stop before reaching the endpoint
+    return calls
+
+
+def _judge_model(tmp_path, monkeypatch, **kw):
+    from eval.scoring.llm import Cache, JudgeModel
+
+    monkeypatch.setenv("MARTIAN_API_KEY", "test")
+    monkeypatch.setenv("MARTIAN_BASE_URL", "http://127.0.0.1:9/v1")
+    jm = JudgeModel("m", cache=Cache(tmp_path / "c.sqlite"), rate=6000, log=lambda msg: None, **kw)
+    jm.backoff_base = 0.01
+    return jm
+
+
+def test_busy_endpoint_pauses_and_resumes(tmp_path, monkeypatch):
+    jm = _judge_model(tmp_path, monkeypatch)
+    assert jm.judge.client.max_retries == 0
+    calls = _fake_endpoint(jm, ["busy", "down", "ok"])
+    result = asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+    assert result["match"] is True
+    assert calls == ["busy", "down", "ok"]  # each failure paused and repeated once; Martian's loop never ran
+
+
+def test_endpoint_unavailable_stops(tmp_path, monkeypatch):
+    from eval.scoring.llm import EndpointUnavailable
+
+    jm = _judge_model(tmp_path, monkeypatch, max_wait=0.05)
+    calls = _fake_endpoint(jm, ["down"])
+    with pytest.raises(EndpointUnavailable):
+        asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+    assert 1 < len(calls) < 10
+
+
+def test_command_line_imports():
+    import eval.scoring.__main__ as cli
+
+    assert callable(cli.main)
+
+
+def test_kendall_tau():
+    from eval.scoring.gates import kendall_tau
+
+    assert kendall_tau({"a": 3, "b": 2, "c": 1}, {"a": 30, "b": 20, "c": 10}) == 1
+    assert kendall_tau({"a": 3, "b": 2, "c": 1}, {"a": 10, "b": 20, "c": 30}) == -1
+
+
+def test_gate1b_end_to_end(tmp_path, monkeypatch):
+    from eval.scoring import gates
+
+    monkeypatch.setattr(gates, "RESULTS", tmp_path / "results")
+    martian = tmp_path / "martian"
+    (martian / "results").mkdir(parents=True)
+    golden = [{"comment": "Injection in search", "severity": "High", "category": "security"},
+              {"comment": "Crash on empty list", "severity": "High", "category": "bug"}]
+    said = {"good": ["injection risk here", "crash on empty input"], "mid": ["injection risk here", "typo"], "bad": ["typo"]}
+    data = {f"https://github.com/o/r/pull/{n}": {"golden_comments": golden, "reviews": [
+        {"tool": t, "review_comments": [{"body": "- " + "\n- ".join(said[t])}]} for t in said]} for n in (1, 2)}
+    (martian / "results" / "benchmark_data.json").write_text(json.dumps(data), encoding="utf-8")
+    f1 = {"good": (2, 0, 0), "mid": (1, 1, 1), "bad": (0, 1, 2)}
+    for judge in gates.PUBLISHED:
+        ev = {url: {t: {"true_positives": [{"category": "bug"}] * tp, "false_negatives": [{"category": "bug"}] * fn,
+                        "fp": fp} for t, (tp, fp, fn) in f1.items()} for url in data}
+        (martian / "results" / judge).mkdir()
+        (martian / "results" / judge / "evaluations.json").write_text(json.dumps(ev), encoding="utf-8")
+    asyncio.new_event_loop().run_until_complete(gates.judge_stored(FakeJudge(), martian, list(said)))
+    text, passed = gates.gate1b_report("fake-model", martian, list(said))
+    assert passed, text
+    assert "fake-model vs claude-opus-4-5-20251101: +1.00" in text

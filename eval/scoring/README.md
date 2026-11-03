@@ -16,10 +16,14 @@ uv run python -m eval.scoring subsets --dataset martian --judge deepseek-flash -
 uv run pytest
 ```
 
-- **`judge`** makes the LLM calls: extraction, dedup, and one judge call per pair of golden comment and candidate. Every answer is cached in `eval/cache/llm.sqlite`, so re-running after an error repeats only the calls that failed. `--whole` also judges each run with all findings extracted as one comment (see the method below). `--concurrency` defaults to 4.
+- **`judge`** makes the LLM calls: extraction, dedup, and one judge call per pair of golden comment and candidate. Every answer is cached in `eval/cache/llm.sqlite`, so re-running after an error repeats only the calls that failed. `--whole` also judges each run with all findings extracted as one comment (see the method below).
+  - **Pacing for the shared endpoint (PLAN 5.1):** at most `--rate` calls a minute (default 10), `--concurrency` at a time (default 1).
+  - On a 429 or a lost connection, it pauses (1 minute, doubling up to 15) and repeats the call.
+  - It stops after `--max-wait` minutes (default 180) without success; re-run to continue.
 - **`report`** makes no LLM calls. It prints precision, recall, F1 with its bootstrap standard error, F2, usage per run, and the paired bootstrap for chosen pairs of views. `--categories` adds recall per golden category, and `--profile strict|core|all` picks Martian's profile (default `core`). With several judges (`--judge a,b,c`), it scores the panel.
 - **`members`** prints, per member: golden comments found, found by no other member, and the false positives it adds. It also gives finding precision per label, the wrongful-refutation rate, and the golden comments that adjudication lost (PLAN Phase 4).
 - **`subsets`** scores every subset of members and applies the selection rule of PLAN Phase 4.
+- **`gate1b`** (J3) re-judges the stored reviews of 7 published tools with a local judge, compares its tool ranking with Martian's published judges, then asks 200 cached prompts again as a repeat check (PLAN Phase 3). Needs `--martian-dir`, the pinned Martian clone's `offline/` folder.
 
 ### Views
 

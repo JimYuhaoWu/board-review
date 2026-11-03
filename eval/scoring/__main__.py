@@ -12,14 +12,17 @@ import argparse
 import asyncio
 import datetime as dt
 import json
+import os
 import sys
+from pathlib import Path
 from collections import Counter
 
 from tqdm import tqdm
 
 from .board import label_stats, member_stats, select_default
+from .gates import GATE1B_TOOLS
 from .data import ROOT, iter_runs, load_dataset
-from .llm import JudgeModel, LLMError, QuotaStop
+from .llm import EndpointUnavailable, JudgeModel, LLMError
 from .metrics import bootstrap, category_recall, per_pr, summarize
 from .pipeline import RESULTS, judge_run, judge_slug, load_records
 from .views import panel, parse_view, score
@@ -50,10 +53,11 @@ async def cmd_judge(args) -> None:
     runs = iter_runs(args.dataset, args.variants.split(","), ids)
     print(f"{len(runs)} finished runs on {len(ids)} PRs")
     for model in args.judge.split(","):
-        jm = JudgeModel(model, concurrency=args.concurrency)
+        jm = JudgeModel(model, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
+                        log=tqdm.write)
         try:
             served = await jm.identify()
-        except (LLMError, QuotaStop) as e:
+        except (LLMError, EndpointUnavailable) as e:
             print(f"{model}: can't use the endpoint: {e}")
             return
         print(f"judge {model}: fingerprint {jm.fingerprint}, served {json.dumps(served)}")
@@ -70,11 +74,9 @@ async def cmd_judge(args) -> None:
                     await judge_run(run, ds.golden[run.pr_id], jm, whole=whole, force=args.force)
                 except (LLMError, ValueError, KeyError) as e:
                     failed.append(f"{run.key}{' (whole)' if whole else ''}: {e}")
-                except QuotaStop as e:
-                    print(f"
-STOPPED: the endpoint refused a call for quota. No more calls this session.
-  {e}")
-                    print(f"{model}: {jm.calls} new calls before the stop. Finished calls are cached.")
+                except EndpointUnavailable as e:
+                    print(f"STOPPED: {e}")
+                    print(f"{model}: {jm.calls} calls this session. Finished calls are cached; re-run to continue.")
                     return
         print(f"{model}: {jm.calls} new calls, {len(failed)} failed runs")
         for line in failed:
@@ -193,6 +195,40 @@ def cmd_subsets(args) -> None:
                                          if c else "none meets the precision floor"))
 
 
+async def cmd_gate1b(args) -> None:
+    from .gates import gate1b_report, judge_stored, repeat_check
+
+    martian = Path(args.martian_dir or os.environ.get("MARTIAN_DIR", ""))
+    if not (martian / "results" / "benchmark_data.json").exists():
+        sys.exit("Point --martian-dir (or MARTIAN_DIR) at the pinned Martian clone's offline/ folder.")
+    tools = args.tools.split(",")
+    report = ROOT / "eval" / "reports" / f"gate1b-{judge_slug(args.judge)}.md"
+    if not args.report_only:
+        jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60,
+                        log=tqdm.write)
+        try:
+            served = await jm.identify()
+            print(f"{dt.datetime.now():%H:%M} judge {args.judge}: fingerprint {jm.fingerprint}, served {json.dumps(served)}")
+            await judge_stored(jm, martian, tools)
+            repeat = await repeat_check(jm, args.repeat) if args.repeat else None
+        except EndpointUnavailable as e:
+            print(f"STOPPED: {e}")
+            print(f"{jm.calls} calls this session. Finished calls are cached; re-run to continue.")
+            return
+        print(f"{dt.datetime.now():%H:%M} done: {jm.calls} calls this session")
+    else:
+        repeat = None
+    text, passed = gate1b_report(args.judge, martian, tools, args.profile)
+    if repeat:
+        text += (f"\n\nRepeat check: {repeat['sampled']} cached judge prompts asked again; same verdict "
+                 f"{repeat['same']}, changed {repeat['changed']}, failed {repeat['failed']} "
+                 f"(agreement {repeat['agreement']:.1%}).")
+    print(text)
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(text + "\n", encoding="utf-8")
+    print(f"\nWritten to {report.relative_to(ROOT)}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -207,7 +243,9 @@ def main() -> None:
     j = sub.choices["judge"]
     j.add_argument("--variants", default="code-review,board-full")
     j.add_argument("--whole", action="store_true", help="also judge each run with all findings extracted as one comment")
-    j.add_argument("--concurrency", type=int, default=4)
+    j.add_argument("--concurrency", type=int, default=1, help="calls in flight at once")
+    j.add_argument("--rate", type=float, default=10.0, help="most calls started per minute")
+    j.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy or unreachable endpoint before stopping")
     j.add_argument("--force", action="store_true", help="re-judge records that already exist")
     r = sub.choices["report"]
     r.add_argument("--views", nargs="+", help="code-review | code-review@whole | board-full@whole | board:<full|default|id,id>:<confirmed|cp|raw>")
@@ -216,11 +254,23 @@ def main() -> None:
     for name in ("members", "subsets"):
         sub.choices[name].add_argument("--labels", choices=["confirmed", "cp", "raw"], default="cp")
     sub.choices["subsets"].add_argument("--top", type=int, default=15)
+    g = sub.add_parser("gate1b", help="local-judge agreement with the published judges (PLAN Phase 3)")
+    g.add_argument("--judge", required=True)
+    g.add_argument("--martian-dir", help="the pinned Martian clone's offline/ folder (or set MARTIAN_DIR)")
+    g.add_argument("--tools", default=",".join(GATE1B_TOOLS))
+    g.add_argument("--repeat", type=int, default=200, help="cached judge prompts to ask again (0 to skip)")
+    g.add_argument("--report-only", action="store_true", help="score existing records; no calls")
+    g.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    g.add_argument("--concurrency", type=int, default=1, help="calls in flight at once")
+    g.add_argument("--rate", type=float, default=10.0, help="most calls started per minute")
+    g.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy or unreachable endpoint")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
     if args.cmd == "judge":
         asyncio.run(cmd_judge(args))
+    elif args.cmd == "gate1b":
+        asyncio.run(cmd_gate1b(args))
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets}[args.cmd](args)
 

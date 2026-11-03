@@ -29,9 +29,14 @@ class LLMError(RuntimeError):
     pass
 
 
-class QuotaStop(BaseException):
-    """The endpoint refused a call for quota (HTTP 429). A BaseException, so it passes through
-    Martian's `except Exception` retry loops: on a quota, every retry counts against it."""
+class EndpointBusy(BaseException):
+    """A call failed for a reason outside the request: HTTP 429 (the cluster throttles when its
+    queue is long) or a lost connection (VPN). A BaseException, so it passes through Martian's
+    `except Exception` retry loops; JudgeModel pauses and then repeats the call itself."""
+
+
+class EndpointUnavailable(Exception):
+    """The endpoint stayed busy or unreachable for longer than the allowed wait."""
 
 
 def load_env() -> None:
@@ -77,7 +82,10 @@ class Cache:
 class JudgeModel:
     """One judge model on an OpenAI-compatible endpoint: extraction, dedup, and judging."""
 
-    def __init__(self, model: str, concurrency: int = 4, cache: Cache | None = None):
+    def __init__(self, model: str, concurrency: int = 1, rate: float = 10.0, max_wait: float = 3 * 3600,
+                 cache: Cache | None = None, log=print):
+        """`rate` is the most calls started per minute; `max_wait` is the longest total pause, in
+        seconds, before giving up on a busy or unreachable endpoint."""
         load_env()
         with redirect_stdout(StringIO()):  # Martian's constructors print the endpoint
             self.extractor = m2.CandidateExtractor()
@@ -87,28 +95,67 @@ class JudgeModel:
             client.model = model
             # Martian's functions do their own retries; the SDK's hidden ones would only spend quota.
             client.client = client.client.with_options(max_retries=0)
-            self._stop_on_quota(client.client)
+            self._flag_busy(client.client)
         self.model = model
         self.cache = cache or Cache()
         self.sem = asyncio.Semaphore(concurrency)
         self.fingerprint = "unset"
         self.served = {}
         self.calls = 0
-        self.stopped = None
+        self.interval = 60.0 / rate
+        self.max_wait = max_wait
+        self.backoff_base = 60.0
+        self.log = log
+        self._lock = asyncio.Lock()
+        self._next = 0.0
+        self._paused_until = 0.0
+        self._backoff = 0
+        self._waited = 0.0
 
-    def _stop_on_quota(self, client) -> None:
+    def _flag_busy(self, client) -> None:
         create = client.chat.completions.create
 
-        async def guarded(*args, **kwargs):
-            if self.stopped:
-                raise QuotaStop(self.stopped)
+        async def flagged(*args, **kwargs):
             try:
                 return await create(*args, **kwargs)
-            except openai.RateLimitError as e:
-                self.stopped = str(e)
-                raise QuotaStop(self.stopped) from None
+            except (openai.RateLimitError, openai.APIConnectionError) as e:
+                raise EndpointBusy(f"{type(e).__name__}: {e}") from None
 
-        client.chat.completions.create = guarded
+        client.chat.completions.create = flagged
+
+    async def _slot(self) -> None:
+        """Wait for the next call slot: at most `rate` calls a minute, none during a pause."""
+        async with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next, self._paused_until)
+            self._next = start + self.interval
+        await asyncio.sleep(start - now)
+
+    def _pause(self, reason: str) -> None:
+        wait = min(self.backoff_base * 2**self._backoff, 15 * self.backoff_base)
+        self._backoff += 1
+        self._waited += wait
+        if self._waited > self.max_wait:
+            raise EndpointUnavailable(f"busy or unreachable for over {self.max_wait / 60:.0f} min; last: {reason}")
+        self._paused_until = max(self._paused_until, time.monotonic() + wait)
+        self.log(f"{time.strftime('%H:%M:%S')} endpoint busy or unreachable, pausing {wait:.0f} s ({reason[:120]})")
+
+    def _ok(self) -> None:
+        self._backoff = 0
+        self._waited = 0.0
+
+    async def _call(self, call):
+        """One paced call; on EndpointBusy, pause and repeat it."""
+        while True:
+            await self._slot()
+            self.calls += 1
+            try:
+                result = await call()
+            except EndpointBusy as e:
+                self._pause(str(e))
+                continue
+            self._ok()
+            return result
 
     async def identify(self) -> dict:
         """Record the endpoint's model-list entry for this model (PLAN 5.1: log the version).
@@ -117,25 +164,19 @@ class JudgeModel:
         The local endpoint's entries carry no version, so they can't reveal a silent model
         update; J3's repeat check covers that.
         """
-        error = None
-        for attempt in range(3):
+        async def listing():
             try:
-                page = await self.judge.client.models.list()
-                entry = next((m.model_dump() for m in page.data if m.id == self.model), None)
-                if entry is None:
-                    raise LLMError(f"{self.model} is not in the endpoint's model list")
-                self.served = entry
-                self.fingerprint = _sha(json.dumps(entry, sort_keys=True))[:12]
-                return entry
-            except LLMError:
-                raise
-            except openai.RateLimitError as e:
-                self.stopped = str(e)
-                raise QuotaStop(self.stopped) from None
-            except Exception as e:  # noqa: BLE001 - network errors: retry, then give up
-                error = e
-                await asyncio.sleep(2**attempt)
-        raise LLMError(f"could not list the endpoint's models: {error}")
+                return await self.judge.client.models.list()
+            except (openai.RateLimitError, openai.APIConnectionError) as e:
+                raise EndpointBusy(f"{type(e).__name__}: {e}") from None
+
+        page = await self._call(listing)
+        entry = next((m.model_dump() for m in page.data if m.id == self.model), None)
+        if entry is None:
+            raise LLMError(f"{self.model} is not in the endpoint's model list")
+        self.served = entry
+        self.fingerprint = _sha(json.dumps(entry, sort_keys=True))[:12]
+        return entry
 
     async def _cached(self, step: str, prompt: str, call):
         key = _sha(step, self.model, self.fingerprint, prompt)
@@ -143,8 +184,7 @@ class JudgeModel:
         if hit is not None:
             return hit
         async with self.sem:
-            self.calls += 1
-            result = await call()
+            result = await self._call(call)
         if result is None or (isinstance(result, dict) and result.get("error")):
             raise LLMError(f"{step} failed: {result.get('error') if isinstance(result, dict) else 'no result'}")
         self.cache.put(key, step, self.model, self.fingerprint, result, prompt)
