@@ -24,11 +24,13 @@ uv run pytest
 - **`members`** prints, per member: golden comments found, found by no other member, and the false positives it adds. Then one **card** per member (PLAN 6.5; `--member <id>` prints only that member's):
   - the runs it ran in;
   - the golden comments in its own categories, found by the member against `/code-review`;
-  - its contribution to board F1 with a paired bootstrap;
+  - unique golden comments (found by no other member);
+  - its marginal recall (the primary member metric) and its contribution to board F1, each with a paired bootstrap;
   - its usage share.
 
   It also gives finding precision per label, the wrongful-refutation rate, and the golden comments that adjudication lost (PLAN Phase 4).
 - **`subsets`** scores every subset of members and applies the selection rule of PLAN Phase 4.
+- **`gate2`** applies Gate 2 as pre-registered on 2026-11-04 (PLAN Phase 3): full-board recall (`board:full:cp`) above `/code-review`'s, with 2 repeats per PR for both. It prints PASS, FAIL, or NOT DECIDED, with precision, F1, the paired-bootstrap CIs, and the grouping loss.
 - **`gate1`** (J3) runs Martian's full pipeline on the stored `claude-code` reviews with a published judge (`--judge openrouter:anthropic/claude-sonnet-4.5`) and compares each golden comment's verdict with Martian's published ones (PLAN Phase 3). Judges named `openrouter:<model id>` use `OPENROUTER_API_KEY` from `.env`.
 - **`gate1b`** (J3) re-judges the stored reviews of 7 published tools with a local judge, compares its tool ranking with Martian's published judges, then asks 200 cached prompts again as a repeat check (PLAN Phase 3). Needs `--martian-dir`, the pinned Martian clone's `offline/` folder.
 
@@ -37,10 +39,11 @@ uv run pytest
 | View | Candidates |
 |---|---|
 | `code-review` | `/code-review`'s findings |
-| `board:full:cp` | all members; findings labeled CONFIRMED or PLAUSIBLE (the Gate 2 metric) |
+| `board:full:cp` | all members; findings labeled CONFIRMED or PLAUSIBLE (the Gate 2 view) |
 | `board:default:cp` | the members in `plugin/skills/review/roster.json` → `default` |
 | `board:edge,intent:confirmed` | any list of members; CONFIRMED only |
 | `board:full:raw` | every finding, before adjudication |
+| `board:full:cp:ungrouped` | a diagnostic: every finding counts, not one per board group. The difference to `board:full:cp` is the grouping loss |
 | `code-review@whole`, `board-full@whole` | the check described in the method, step 2 |
 
 ### Test PRs

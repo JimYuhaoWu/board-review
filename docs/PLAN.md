@@ -13,6 +13,11 @@ We need data to answer two questions:
 1. Which members belong on the **default board**, and which stay **optional**?
 2. Does the board beat Claude Code's built-in `/code-review`?
 
+The two boards have different jobs (decided 2026-11-04):
+
+- The **full board** is for recall. Optional members exist to find more in their field, such as performance in memory-limited code, so the board with every member must find the most: its recall must beat `/code-review`'s. Precision is the verifiers' job.
+- The **default board** is the everyday board: the best F1 for its cost, selected by the Phase 4 rule.
+
 The evaluation pipeline must also stay reusable. Testing a new member, or a member for a specific field, must take minimal effort and minimal usage.
 
 The whole experiment must fit inside two subscription plans (section 7).
@@ -42,7 +47,13 @@ The "Golden issues" column shows how many of the 173 golden issues in the Martia
 | `concurrency` | Concurrency checker | Races, ordering assumptions, stale state, re-entrancy | concurrency 14 | optional |
 | `contract` | Contract checker | API, schema, and signature changes that break callers; version skew | api 13 | optional |
 | `perf` | Algorithm expert | Complexity and query patterns. Runs only when the change touches loops over data, queries, or hot paths | perf 6 | optional |
-| `nitpicker` | Nitpicker | Naming, structure, inheritance vs. duplication | style 10 | optional |
+| `nitpicker` | Nitpicker | Text that is wrong: names, docs, comments, messages, conventions | style 10, doc_defect | optional |
+| `line-reader` | Line reader | Every changed line in order: won't parse or run, wrong conditions, variables, indices | bug | added 2026-11-04 |
+| `regression` | Regression checker | Old behavior the change drops: defaults, migrations, removed or reordered steps | bug, data, api | added 2026-11-04 |
+| `boundary` | Boundary checker | Values crossing serialization, storage, files, processes, and library or browser APIs | bug, data, api | added 2026-11-04 |
+| `test-auditor` | Test auditor | Tests that can't catch what they claim to | test_gap | added 2026-11-04 |
+
+The last four were added after two pilot attempts (section 5, Phase 3). The topic members missed ordinary line-level bugs that no topic owns, and several members reported the same obvious bug. The new members are defined by **method** (read every line, compare old and new, follow values across boundaries, try to break the tests) rather than by topic, so their attention lands on different lines.
 
 Domain members, such as a member for bioinformatics pipelines, can't be measured on Martian because Martian contains only web applications. They are tested on domain datasets (section 6.3).
 
@@ -149,7 +160,13 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
   - **Pass rule:** the local judge's mean Kendall τ (F1 ranking, Core profile) with the three published judges is at least the lowest τ between two published judges.
   - **Repeat check:** 200 of the judge's cached prompts are asked again. The agreement rate shows how repeatable temperature 0 is, and becomes the baseline for the drift check at later sessions.
   - Command: `uv run python -m eval.scoring gate1b --judge <model> --martian-dir <Martian clone>/offline`; the report goes to `eval/reports/gate1b-<model>.md`.
-- **Gate 2, early stop:** the full board must score a higher F1 than `/code-review` on the pilot PRs, using the development judge, Martian's Core profile, and board findings labeled CONFIRMED or PLAUSIBLE. If it doesn't, stop and rethink the design before spending more usage.
+- **Gate 2, early stop.** History: the first rule asked for a higher F1 than `/code-review`. The board failed it twice (42.0% vs 43.5%, then 38.2% vs 43.5% after the Saboteur and Nitpicker rewrites; `eval/reports/pilot-gate2-deepseek-flash.md`). Both times precision was level and recall was the gap. The design was rethought (section 1, section 3), and the rule below replaces the old one. It was written on 2026-11-04, before any run of the new design:
+  - **Rule:** the full board's **recall** (Core profile, findings labeled CONFIRMED or PLAUSIBLE, as the report shows them) is higher than `/code-review`'s on the 10 pilot PRs, judged by the development judge.
+  - **Repeats:** 2 per PR for both variants. With 1 repeat, a swing of 4 golden comments moves the result by about 9 points of recall.
+  - **Reported, not deciding:** the paired-bootstrap CI for the recall difference, precision, F1, the grouping loss, and the member cards.
+  - **Command:** `uv run python -m eval.scoring gate2 --dataset martian --judge deepseek-flash --split dev`. It prints PASS, FAIL, or NOT DECIDED (too few repeats).
+  - **If it fails:** stop. The next step is a written analysis and a decision by both collaborators, not another tuning round on the pilot.
+  - **If it passes:** Phase 4.
 
 ### Phase 4: full runs, select the default board
 
@@ -170,6 +187,8 @@ Then score every subset of members offline (section 6.2).
 3. Members outside it become optional.
 4. A member with zero unique true positives across the development PRs leaves the pool.
 
+This rule picks the default board. The **full board** keeps every member whose marginal recall (section 6.5) is above zero on its own field's data. A member is judged only on a dataset that has golden issues in its categories: Martian has no performance issues in the pilot, so the Performance member can't earn or lose its place there.
+
 **Adjudicator checks on the development PRs:**
 
 - **Wrongful refutation rate:** how often a REFUTED finding matches a real golden issue. This is the most important number for unattended use, because each case is a real bug the board discarded.
@@ -178,6 +197,16 @@ Then score every subset of members offline (section 6.2).
 **Check offline b against real b runs:** once the default board is chosen, run it for real (1 repeat) on the development PRs, and compare its CONFIRMED + PLAUSIBLE F1 with the offline estimate. If they differ by more than one bootstrap standard error, Phase 5 reports b from real runs on the test PRs too.
 
 Both collaborators sign off on the selected default board before anyone scores the test PRs.
+
+### When members are tuned
+
+Tuning a brief on the development PRs is allowed, but each change is an experiment with a written rule:
+
+1. **Trigger.** A member card shows a problem: zero unique golden comments over at least 20 runs, own-category recall clearly below `/code-review`'s, or heavy overlap with another member.
+2. **One change set per round,** frozen before the run. The change states a general rule about reviewing; it must not list the development PRs' issues.
+3. **Measure** with at least 2 repeats per PR, and compare with the previous version by paired bootstrap on the member's marginal recall and its own-category recall.
+4. **Keep, revise once, or retire.** A member that still has zero unique golden comments after one revision leaves the pool.
+5. The test PRs are never used for tuning (section 6.6).
 
 ### Phase 4b (optional): stronger models for selected roles
 
@@ -295,7 +324,10 @@ Results from different reviewer models or judges are never pooled. Results from 
 
 - **Runs:** how many runs the member ran in. Triggers skip some.
 - **Own categories:** the golden comments in the categories its brief targets (its `categories:` frontmatter). The card shows how many the member found, how many `/code-review` found on the same PRs, and the total. This check exposed the Saboteur: 0 of 7, against 6 for `/code-review`.
-- **Contribution:** board F1 minus the F1 of the board without the member, with a paired bootstrap over PRs. Positive means the member helps.
+- **Unique:** golden comments the member found that no other member found.
+- **Marginal recall** (the primary member metric, 2026-11-04): board recall minus the recall of the board without the member, with a paired bootstrap over PRs. Positive means the member adds recall.
+- **F1 contribution:** the same difference in F1. It matters for the default board.
+- **Caveat:** both differences are computed on the report, which shows one finding per group. Removing a member can change which finding heads a group, so while the board over-merges, a member can show a negative marginal recall that is really a grouping effect. `report --views board:full:cp:ungrouped` scores every finding; the difference to `board:full:cp` is the **grouping loss**, which `gate2` prints. On the second pilot it was 5 golden comments.
 - **Usage share:** the member's share of the price-weighted tokens of all members and verifiers, read from `stream.jsonl`.
 - **The member table** above the cards: golden comments found, found by no other member, false positives added, and precision.
 
@@ -379,6 +411,8 @@ board-review/
 - Development judge: `deepseek-flash` on account A's free local endpoint, subject to Gate 1b.
 - Final judge panel: the 3 local models (free). The paid published judges are the backup (5.1).
 - Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
+- Gate 2 rule, v2 (2026-11-04): full-board recall above `/code-review`'s, 2 repeats per PR (Phase 3). The full board is for recall, the default board for F1 (section 1).
+- Four method-based members added, the grouping rule tightened, and marginal recall made the primary member metric (2026-11-04).
 - Intent: both variants get the PR title and description (5.1), with "neither" as the fallback.
 - Gate 1's paid judge: Claude Sonnet 4.5 through OpenRouter, with the pass rule in Phase 3.
 - Pinned Claude Code version: 2.1.317 on both machines.
@@ -397,6 +431,7 @@ None at the moment.
 - **Web applications only:** results on Martian don't transfer automatically to other fields. That is why domain datasets exist.
 - **Variable intent text:** the intent auditor depends on PR descriptions, and their quality varies.
 - **Few repeats:** 2 repeats make each comparison noisier, so only larger differences will be clear.
+- **Members designed after seeing development misses.** The four members added on 2026-11-04 were motivated by what the pilot missed. Their briefs state general methods, but the pilot will flatter them. Only the test split can show whether they generalize.
 - **Offline variant b keeps c's labels (Yara, review of PR #8).** Grouping and adjudication run over all members' findings. In a real b run, groups would be smaller, a group's severity could drop below the bar for a second verifier, and verifiers would see fewer co-findings. So offline b is exact for the raw union but only approximate for CONFIRMED and PLAUSIBLE. Phase 4 checks the size of this effect with real b runs on the development PRs.
 - **`/code-review` reports at most 32 findings,** even with `--max-findings all`: that is its `ReportFindings` tool's limit. Martian PRs have far fewer golden comments, so the cap should rarely matter.
 

@@ -1,5 +1,5 @@
 {
   "_comment": "The default roster is a hypothesis until PLAN Phase 4 selects it from data.",
   "default": ["intent", "edge", "saboteur", "intern"],
-  "full": ["intent", "edge", "saboteur", "intern", "concurrency", "contract", "perf", "nitpicker"]
+  "full": ["intent", "edge", "saboteur", "intern", "concurrency", "contract", "perf", "nitpicker", "line-reader", "regression", "boundary", "test-auditor"]
 }

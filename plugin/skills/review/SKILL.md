@@ -1,6 +1,6 @@
 ---
 name: review
-description: Board review of a code change. Independent specialist reviewers (intent, edge cases, security, explain-back, plus optional concurrency, contracts, performance, and style) each read the change, then separate verifiers label every finding CONFIRMED, PLAUSIBLE, or REFUTED from evidence. Use after a long coding session or before merging, when the user asks for a board review.
+description: Board review of a code change. Independent specialist reviewers (intent, edge cases, security, explain-back, plus optional concurrency, contracts, performance, wrong text, line-by-line reading, regressions, boundaries, and tests) each read the change, then separate verifiers label every finding CONFIRMED, PLAUSIBLE, or REFUTED from evidence. Use after a long coding session or before merging, when the user asks for a board review.
 argument-hint: "[--members default|full|id,id] [--format markdown|json] [--intent text | --intent-file path] [target]"
 allowed-tools: Read Grep Glob Bash(git diff *) Bash(git show *) Bash(git log *) Bash(git rev-parse *) Bash(git merge-base *) Bash(git status *) Bash(git grep *) Bash(git blame *) Bash(git ls-files *) Bash(gh pr view *) Bash(gh pr diff *)
 ---
@@ -101,7 +101,9 @@ Nothing else goes in the prompt.
 
 Each member returns one JSON object (`member_output`). If a member's output isn't valid JSON, or the member failed, record it under `members.failed` with the reason, and continue without it.
 
-Give every finding an id `<member>-<n>`. Then group findings that describe the **same root cause at the same place**, even if worded differently. Each group gets an id `G1`, `G2`, and so on. Keep every finding; grouping never deletes one. A group's severity is the highest among its findings.
+Give every finding an id `<member>-<n>`. Then group findings that describe the **same problem**, even if worded differently. Each group gets an id `G1`, `G2`, and so on. Keep every finding; grouping never deletes one. A group's severity is the highest among its findings.
+
+Two findings are the same problem only when one fix resolves both and they describe the same wrong outcome. Being near each other, in the same function, or about the same input isn't enough. When in doubt, keep them apart: a separate group costs one more verifier claim, while a wrong merge hides a problem from the report. A finding that names a problem no other finding in its group names gets its own group. The report shows the first finding of each group, so put first the finding whose claim states the group's problem most completely.
 
 ## 7. Adjudicate
 

@@ -368,3 +368,46 @@ def test_gate1_agreement(tmp_path, monkeypatch):
     text, passed = gates.gate1_report("fake-model", "pub", martian)
     assert passed, text
     assert "2 of 2 (100.0%)" in text
+
+
+def test_ungrouped_view_counts_every_finding():
+    rec = _record()
+    # Put edge-1 (finds G-off) in a board group headed by the saboteur's finding.
+    for f in rec["findings"]:
+        f["group"] = {"sab-1": "G1", "edge-1": "G1"}.get(f["id"], f["id"])
+    grouped = score(rec, parse_view("board:saboteur,edge:cp"))
+    ungrouped = score(rec, parse_view("board:saboteur,edge:cp:ungrouped"))
+    assert (grouped["tp"], ungrouped["tp"]) == (1, 2)  # the report hides edge-1; the diagnostic doesn't
+    with pytest.raises(ValueError):
+        parse_view("board:full:cp:other")
+
+
+def test_member_cards_marginal_recall():
+    from eval.scoring.board import member_cards
+
+    rec = _record()
+    cards = {c["member"]: c for c in member_cards([rec], {}, {}, {}, "core", n_boot=20)}
+    assert cards["saboteur"]["unique"] == 1 and cards["saboteur"]["marginal_recall"] > 0  # only it finds G-sql
+    assert cards["edge"]["unique"] == 0 and cards["edge"]["marginal_recall"] == 0  # intent also finds G-off
+    assert cards["nitpicker"]["marginal_recall"] == 0 and cards["nitpicker"]["contribution"] < 0
+
+
+def test_gate2_needs_two_repeats(monkeypatch, capsys):
+    import argparse
+    from eval.scoring import __main__ as cli
+
+    rec1, rec2 = _record(), {**_record(), "repeat": 2}
+    def results(args, view, ids):
+        r = {("p1", 1): score(rec1, view)}
+        if args.repeats == 2:
+            r[("p1", 2)] = score(rec2, view)
+        return r
+    monkeypatch.setattr(cli, "_results", results)
+    monkeypatch.setattr(cli, "pr_ids", lambda args: ["p1", "p2"])
+    args = argparse.Namespace(dataset="d", judge="j", split="dev", profile="core", bootstrap=20, repeats=1)
+    cli.cmd_gate2(args)
+    assert "NOT DECIDED" in capsys.readouterr().out
+    args.repeats = 2
+    cli.cmd_gate2(args)
+    out = capsys.readouterr().out
+    assert "NOT DECIDED" not in out and "Gate 2: FAIL" in out  # the same review on both sides: no recall gain
