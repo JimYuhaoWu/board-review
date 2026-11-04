@@ -4,7 +4,9 @@ Each run gets a fresh worktree at the head commit, the pinned command, and the c
 folder. The runner stops a run as soon as its init event shows a different setup. A run that
 hits a plan usage limit is recorded as `failed:usage-limit`, never as an empty review; running
 the same command again skips finished runs and retries the rest. A board run is one `claude -p`
-call, so a retry re-runs the whole board, not single members.
+call, so a retry re-runs the whole board, not single members. A finished board run made with an
+older plugin isn't done: `stale_reason` names what changed, and its folder must be moved aside
+before it runs again.
 """
 
 from __future__ import annotations
@@ -108,13 +110,64 @@ class RunMeta(BaseModel):
     setup: InitInfo | None = None
 
 
+def run_name(spec: RunSpec) -> str:
+    return f"{spec.dataset}/{spec.variant}/{spec.pr_id}/r{spec.repeat}"
+
+
 def run_dir(paths: Paths, spec: RunSpec) -> Path:
-    return paths.results / spec.dataset / spec.variant / spec.pr_id / f"r{spec.repeat}"
+    return paths.results / run_name(spec)
 
 
 def is_done(paths: Paths, spec: RunSpec) -> bool:
     meta = run_dir(paths, spec) / "meta.json"
     return meta.exists() and json.loads(meta.read_text(encoding="utf-8")).get("status") == "ok"
+
+
+def stale_reason(paths: Paths, spec: RunSpec) -> str | None:
+    """What changed in the plugin since a finished board run, or None if the run still matches.
+
+    Only the shared skill files and the members that ran or were skipped in that run count.
+    /code-review runs don't read the board's files, so they are never stale.
+    """
+    if not spec.variant.startswith("board-") or not is_done(paths, spec):
+        return None
+    meta = json.loads((run_dir(paths, spec) / "meta.json").read_text(encoding="utf-8"))
+    old, current = meta["skill_hashes"], skill_hashes()
+    changed = [name for name in SKILL_FILES if old.get(name) != current[name]]
+    if not changed and meta["config_hash"] != config_hash(spec, PINNED_VERSION, current):
+        changed = ["effort or Claude Code version"]
+    members = meta.get("members") or {}
+    took_part = [*members.get("ran", []), *(s["id"] for s in members.get("skipped", []))]
+    changed += [f"member {m}" for m in took_part if old.get(f"member:{m}") != current.get(f"member:{m}")]
+    return ", ".join(changed) or None
+
+
+def cache_clash(paths: Paths, spec: RunSpec) -> str | None:
+    """The other run whose cache file this run would overwrite, or None.
+
+    The cache path doesn't name the variant. A member run alone while its brief is unchanged
+    since a full run of the same PR and repeat would replace that run's file, and would measure
+    nothing new. A full run may replace a single-member file: scoring starts from the full run.
+    """
+    if spec.variant == "board-full":
+        return None
+    hashes = skill_hashes()
+    config = config_hash(spec, PINNED_VERSION, hashes)
+    for member in spec.members.split(","):
+        path = cache_file(paths.cache, spec, member, config, hashes.get(f"member:{member}", "unknown"))
+        if path.exists():
+            source = json.loads(path.read_text(encoding="utf-8")).get("source_run")
+            if source != run_name(spec):
+                return source
+    return None
+
+
+def cache_file(cache: Path, spec: RunSpec, member: str, config: str, member_hash: str) -> Path:
+    """<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-file-hash>.json"""
+    return (
+        cache / spec.dataset / spec.pr_id / f"r{spec.repeat}"
+        / f"{member}@{spec.model}" / config / f"{member_hash}.json"
+    )
 
 
 def prompt_for(spec: RunSpec, intent_file: Path | None) -> str:
@@ -400,10 +453,7 @@ def _finish(meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out
 
 
 def _write_cache(cache: Path, spec: RunSpec, meta: RunMeta, board: dict[str, Any]) -> None:
-    """Split the board's findings by member (PLAN 6.2).
-
-    Path: <dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-file-hash>.json
-    """
+    """Split the board's findings by member (PLAN 6.2), one file per member at `cache_file`."""
     members = board.get("members") or {}
     entries: dict[str, dict[str, Any]] = {m: {"status": "ran", "findings": []} for m in members.get("ran", [])}
     for skipped in members.get("skipped", []):
@@ -413,13 +463,9 @@ def _write_cache(cache: Path, spec: RunSpec, meta: RunMeta, board: dict[str, Any
     if "intern" in entries and board.get("explanations"):
         entries["intern"]["explanations"] = board["explanations"]
 
-    source = f"{spec.dataset}/{spec.variant}/{spec.pr_id}/r{spec.repeat}"
     for member, entry in entries.items():
         member_hash = meta.skill_hashes.get(f"member:{member}", "unknown")
-        path = (
-            cache / spec.dataset / spec.pr_id / f"r{spec.repeat}"
-            / f"{member}@{spec.model}" / meta.config_hash / f"{member_hash}.json"
-        )
+        path = cache_file(cache, spec, member, meta.config_hash, member_hash)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"member": member, **entry, "source_run": source}
+        payload = {"member": member, **entry, "source_run": run_name(spec)}
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")

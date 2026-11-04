@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from eval.runner import __main__ as cli
 from eval.runner import run as runner
 from eval.runner.stream import ExpectedSetup, InitInfo, ResultInfo, parse_board_json, setup_problems
 
@@ -287,3 +288,94 @@ def test_setup_mismatch_stops_the_run(tmp_path: Path, monkeypatch: pytest.Monkey
     meta = runner.run_one(_spec(tmp_path, "code-review", path, base, head), _paths(tmp_path), "B")
     assert meta.status == "failed:setup-mismatch"
     assert started[0].killed
+
+
+def _board_result(board: dict) -> dict:
+    return {"type": "result", "is_error": False, "subtype": "success", "result": json.dumps(board)}
+
+
+DEV_PR, TEST_PR = "cal_dot_com-7232", "cal_dot_com-22345"
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--members", "edge", "--set", "test"], "development PRs only"),
+        (["--members", "edge", "--set", "all"], "development PRs only"),
+        (["--members", "edge", "--prs", f"{DEV_PR},{TEST_PR}"], "development PRs only"),
+        (["--members", "edge,intern", "--set", "dev"], "one member"),
+        (["--members", "ghost", "--set", "dev"], "unknown member"),
+    ],
+)
+def test_single_member_runs_are_refused(tmp_path: Path, args: list[str], message: str):
+    with pytest.raises(SystemExit, match=message):
+        cli.main(["run", "--variant", "board-full", "--repeat", "1", "--dry-run", "--results-dir", str(tmp_path), *args])
+
+
+def test_single_member_runs_get_their_own_variant(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    cli.main(["run", "--variant", "board-full", "--members", "edge", "--prs", DEV_PR, "--repeat", "1", "--dry-run",
+              "--results-dir", str(tmp_path / "results"), "--cache-dir", str(tmp_path / "cache")])
+    out = capsys.readouterr().out
+    assert f"martian/board-edge/{DEV_PR}/r1 (to run)" in out
+    assert "--members edge --max-findings 8" in out
+
+
+def test_skipped_member_is_an_ok_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    board = {"schema_version": 1, "findings": [],
+             "members": {"ran": [], "skipped": [{"id": "concurrency", "reason": "no shared state"}], "failed": []}}
+    _run_with(monkeypatch, [_init_event(), _board_result(board)])
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-concurrency", path, base, head).model_copy(update={"members": "concurrency"})
+    meta = runner.run_one(spec, paths, "B")
+
+    assert meta.status == "ok" and meta.roster == "concurrency"
+    assert "--members concurrency " in meta.command[1]
+    cached = runner.cache_file(paths.cache, spec, "concurrency", meta.config_hash, meta.skill_hashes["member:concurrency"])
+    entry = json.loads(cached.read_text(encoding="utf-8"))
+    assert entry["status"] == "skipped" and entry["source_run"] == "smoke/board-concurrency/smoke/r1"
+
+
+def test_stale_board_runs_name_what_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    _run_with(monkeypatch, [_init_event(), _board_result(BOARD)])
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-full", path, base, head)
+    runner.run_one(spec, paths, "B")
+    assert runner.stale_reason(paths, spec) is None
+
+    current = runner.skill_hashes()
+    # BOARD ran edge and intern and skipped perf; the saboteur didn't take part, so its edit doesn't matter.
+    monkeypatch.setattr(runner, "skill_hashes", lambda: {**current, "member:perf": "new", "member:saboteur": "new"})
+    assert runner.stale_reason(paths, spec) == "member perf"
+    monkeypatch.setattr(runner, "skill_hashes", lambda: {**current, "verifier": "new"})
+    assert runner.stale_reason(paths, spec) == "verifier"
+    assert runner.stale_reason(paths, spec.model_copy(update={"variant": "code-review"})) is None
+
+
+def test_run_stops_on_stale_runs_before_starting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    old = tmp_path / "results" / "smoke" / "board-full" / "smoke" / "r1"
+    old.mkdir(parents=True)
+    meta = {"status": "ok", "skill_hashes": {}, "config_hash": "old", "members": {"ran": ["edge"]}}
+    (old / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    monkeypatch.setattr(cli, "check_claude", lambda paths: pytest.fail("a run started"))
+    with pytest.raises(SystemExit, match="older plugin"):
+        cli.main(["run", "--variant", "board-full", "--smoke-repo", str(path), "--base", base, "--head", head,
+                  "--repeat", "1", "--results-dir", str(tmp_path / "results"), "--cache-dir", str(tmp_path / "cache"),
+                  "--data-dir", str(tmp_path)])
+
+
+def test_unchanged_member_alone_would_overwrite_the_full_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    _run_with(monkeypatch, [_init_event(), _board_result(BOARD)])
+    paths = _paths(tmp_path)
+    full = _spec(tmp_path, "board-full", path, base, head)
+    runner.run_one(full, paths, "B")
+    alone = full.model_copy(update={"variant": "board-edge", "members": "edge"})
+    assert runner.cache_clash(paths, alone) == "smoke/board-full/smoke/r1"
+
+    current = runner.skill_hashes()
+    monkeypatch.setattr(runner, "skill_hashes", lambda: {**current, "member:edge": "edited"})
+    assert runner.cache_clash(paths, alone) is None

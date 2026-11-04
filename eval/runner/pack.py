@@ -1,8 +1,9 @@
 """Zip a batch of finished runs for the judging machine (PLAN 5.1: judging runs on account A only).
 
 The zip holds `eval/results/<dataset>/<variant>/<pr_id>/r<repeat>/` for every run whose status
-is ok, with paths relative to the repo root, plus a `manifest.json`. Extract it at the repo root
-on the other machine, for example `uv run python -m zipfile -e <zip> .`.
+is ok, the `eval/cache/` files those runs wrote (scoring checks a single-member run's hashes
+against them), with paths relative to the repo root, plus a `manifest.json`. Extract it at the
+repo root on the other machine, for example `uv run python -m zipfile -e <zip> .`.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ from eval.runner import gitrepo
 from eval.runner.records import ROOT
 
 
-def pack_runs(results: Path, runs: list[tuple[str, str, str, int]], out: Path) -> tuple[list[str], list[str]]:
+def pack_runs(
+    results: Path, cache: Path, runs: list[tuple[str, str, str, int]], out: Path
+) -> tuple[list[str], list[str]]:
     """Zip the finished ones of (dataset, variant, pr_id, repeat). Returns (packed, skipped)."""
     packed, skipped = [], []
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +34,9 @@ def pack_runs(results: Path, runs: list[tuple[str, str, str, int]], out: Path) -
                 continue
             for path in sorted(p for p in run.rglob("*") if p.is_file()):
                 zf.write(path, (Path("eval/results") / path.relative_to(results)).as_posix())
+            for path in sorted((cache / dataset / pr_id / f"r{repeat}").rglob("*.json")):
+                if json.loads(path.read_text(encoding="utf-8")).get("source_run") == name:
+                    zf.write(path, (Path("eval/cache") / path.relative_to(cache)).as_posix())
             packed.append(name)
         manifest = {
             "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),

@@ -308,7 +308,7 @@ The test PRs are used only for release comparisons, and each use is logged. Repe
 ### 6.7 Testing a new member, end to end
 
 1. Add or edit `members/<id>.md`. A new member gets `status: candidate`.
-2. Run only that member on the development PRs, with the same repeat numbers as the full runs: `uv run python -m eval.runner run --variant board-full --members <id> --set dev --repeat N`. The runner refuses test PRs. The spec is TASKS Y7; this isn't built yet.
+2. Run only that member on the development PRs, with the same repeat numbers as the full runs: `uv run python -m eval.runner run --variant board-full --members <id> --set dev --repeat N`. The runner refuses test PRs, and a member whose brief is unchanged since the full run of the same PR and repeat. The spec is TASKS Y7.
 3. Judge the new runs, then read the member's card with `python -m eval.scoring members ... --member <id>`. The card combines the member's new findings with the other members' findings from the full runs. The spec is TASKS J5; this isn't built yet.
 4. If the card meets the promotion rule, change `status`, and update `roster.json` when the member joins the default board.
 
