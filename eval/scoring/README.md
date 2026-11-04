@@ -21,7 +21,13 @@ uv run pytest
   - On a 429 or a lost connection, it pauses (1 minute, doubling up to 15) and repeats the call.
   - It stops after `--max-wait` minutes (default 180) without success; re-run to continue.
 - **`report`** makes no LLM calls. It prints precision, recall, F1 with its bootstrap standard error, F2, usage per run, and the paired bootstrap for chosen pairs of views. `--categories` adds recall per golden category, and `--profile strict|core|all` picks Martian's profile (default `core`). With several judges (`--judge a,b,c`), it scores the panel.
-- **`members`** prints, per member: golden comments found, found by no other member, and the false positives it adds. It also gives finding precision per label, the wrongful-refutation rate, and the golden comments that adjudication lost (PLAN Phase 4).
+- **`members`** prints, per member: golden comments found, found by no other member, and the false positives it adds. Then one **card** per member (PLAN 6.5; `--member <id>` prints only that member's):
+  - the runs it ran in;
+  - the golden comments in its own categories, found by the member against `/code-review`;
+  - its contribution to board F1 with a paired bootstrap;
+  - its usage share.
+
+  It also gives finding precision per label, the wrongful-refutation rate, and the golden comments that adjudication lost (PLAN Phase 4).
 - **`subsets`** scores every subset of members and applies the selection rule of PLAN Phase 4.
 - **`gate1`** (J3) runs Martian's full pipeline on the stored `claude-code` reviews with a published judge (`--judge openrouter:anthropic/claude-sonnet-4.5`) and compares each golden comment's verdict with Martian's published ones (PLAN Phase 3). Judges named `openrouter:<model id>` use `OPENROUTER_API_KEY` from `.env`.
 - **`gate1b`** (J3) re-judges the stored reviews of 7 published tools with a local judge, compares its tool ranking with Martian's published judges, then asks 200 cached prompts again as a repeat check (PLAN Phase 3). Needs `--martian-dir`, the pinned Martian clone's `offline/` folder.

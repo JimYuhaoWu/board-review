@@ -19,9 +19,9 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from .board import label_stats, member_stats, select_default
+from .board import label_stats, member_cards, member_stats, members_in, select_default
 from .gates import GATE1B_TOOLS
-from .data import ROOT, iter_runs, load_dataset
+from .data import ROOT, iter_runs, load_dataset, member_categories, subagent_usage
 from .llm import EndpointUnavailable, JudgeModel, LLMError
 from .metrics import bootstrap, category_recall, per_pr, summarize
 from .pipeline import RESULTS, judge_run, judge_slug, load_records
@@ -168,6 +168,29 @@ def cmd_members(args) -> None:
     print("|---|---|---|---|---|---|")
     for s in member_stats(records, args.profile, args.labels):
         print(f"| {s['member']} | {s['found']} | {s['unique']} | {s['candidates']} | {s['unmatched']} | {s['precision']:.1%} |")
+    baseline = {(r["pr_id"], r["repeat"]): score(r, parse_view("code-review"))
+                for r in load_records(args.dataset, args.judge, "code-review", ids)}
+    usage = Counter()
+    for r in records:
+        stream = RESULTS / args.dataset / "board-full" / r["pr_id"] / f"r{r['repeat']}" / "stream.jsonl"
+        if stream.exists():
+            usage.update(subagent_usage(stream))
+    cards = member_cards(records, baseline, {m: member_categories(m) for m in members_in(records)}, usage,
+                         args.profile, args.labels, args.bootstrap)
+    if args.member:
+        cards = [c for c in cards if c["member"] in args.member.split(",")]
+    print(f"\n**Member cards** (PLAN 6.5). Own categories: golden comments in the categories the brief targets, "
+          f"found by the member / by `/code-review` on the same PRs / in total, all profiles. Contribution: board F1 "
+          f"minus the F1 without the member (positive helps), paired bootstrap over {len({r['pr_id'] for r in records})} PRs.\n")
+    print("| Member | Runs | Own categories | Found: member / `/code-review` / total | F1 without it | Contribution (95% CI) | Usage share |")
+    print("|---|---|---|---|---|---|---|")
+    for c in cards:
+        lo, hi = c["ci95"]
+        print(f"| {c['member']} | {c['runs']}/{len(records)} | {', '.join(c['categories']) or 'none'} | "
+              f"{c['own_found']:g} / {c['own_found_baseline']:g} / {c['own_total']} | {c['f1_without']:.1%} | "
+              f"{c['contribution']:+.1%} ({lo:+.1%} to {hi:+.1%}) | {c['usage_share']:.0%} |")
+    if usage.get("verifier"):
+        print(f"\nVerifiers: {usage['verifier'] / sum(usage.values()):.0%} of the usage.")
     ls = label_stats(records, args.profile)
     print("\n**Labels** (a finding matches when any of its candidates matches a golden comment)\n")
     print("| Label | Findings | Matching a golden comment | Precision |")
@@ -282,6 +305,7 @@ def main() -> None:
     for name in ("members", "subsets"):
         sub.choices[name].add_argument("--labels", choices=["confirmed", "cp", "raw"], default="cp")
     sub.choices["subsets"].add_argument("--top", type=int, default=15)
+    sub.choices["members"].add_argument("--member", help="comma-separated ids: print only their cards")
     g = sub.add_parser("gate1b", help="local-judge agreement with the published judges (PLAN Phase 3)")
     g.add_argument("--judge", required=True)
     g.add_argument("--martian-dir", help="the pinned Martian clone's offline/ folder (or set MARTIAN_DIR)")

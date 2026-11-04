@@ -291,12 +291,13 @@ Results from different reviewer models or judges are never pooled. Results from 
 
 ### 6.5 Member cards
 
-`eval report --member <id>` writes a card for one member, per dataset:
+`python -m eval.scoring members --dataset <name> --judge <judge> [--member <id>]` prints a card per member, per dataset (built 2026-11-04):
 
-- Unique true positives and false positives added.
-- Precision and recall per category.
-- Usage share.
-- Its marginal effect on the default board.
+- **Runs:** how many runs the member ran in. Triggers skip some.
+- **Own categories:** the golden comments in the categories its brief targets (its `categories:` frontmatter). The card shows how many the member found, how many `/code-review` found on the same PRs, and the total. This check exposed the Saboteur: 0 of 7, against 6 for `/code-review`.
+- **Contribution:** board F1 minus the F1 of the board without the member, with a paired bootstrap over PRs. Positive means the member helps.
+- **Usage share:** the member's share of the price-weighted tokens of all members and verifiers, read from `stream.jsonl`.
+- **The member table** above the cards: golden comments found, found by no other member, false positives added, and precision.
 
 Promotion from candidate to optional to default uses the same rule as Phase 4, on development PRs only.
 
@@ -306,10 +307,10 @@ The test PRs are used only for release comparisons, and each use is logged. Repe
 
 ### 6.7 Testing a new member, end to end
 
-1. Add `members/<id>.md` with `status: candidate`.
-2. Run `eval run --dataset <name> --split dev --members <id>`. Only the new member runs; everything else comes from the cache.
-3. Run `eval report --member <id>`.
-4. If the card meets the promotion rule, change `status`, and update `roster.json` when it joins the default board.
+1. Add or edit `members/<id>.md`. A new member gets `status: candidate`.
+2. Run only that member on the development PRs, with the same repeat numbers as the full runs: `uv run python -m eval.runner run --variant board-full --members <id> --set dev --repeat N`. The runner refuses test PRs. The spec is TASKS Y7; this isn't built yet.
+3. Judge the new runs, then read the member's card with `python -m eval.scoring members ... --member <id>`. The card combines the member's new findings with the other members' findings from the full runs. The spec is TASKS J5; this isn't built yet.
+4. If the card meets the promotion rule, change `status`, and update `roster.json` when the member joins the default board.
 
 ## 7. Usage limits
 
