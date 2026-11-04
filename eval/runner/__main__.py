@@ -5,12 +5,20 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner golden                                # Y2: golden.jsonl
     uv run python -m eval.runner split  [--dev-per-repo N]             # Y3: split.json, written once
     uv run python -m eval.runner run --variant V (--prs IDS | --set S) --repeat N [--dry-run]   # Y4
+    uv run python -m eval.runner run --variant board-full --members ID (--prs IDS | --set dev|pilot) \\
+        --repeat N                                                                            # Y7: one member
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
-    uv run python -m eval.runner pack --variant V (--prs IDS | --set S) --repeat N            # zip for judging
+    uv run python -m eval.runner pack --variant V [--members ID] (--prs IDS | --set S) --repeat N   # zip for judging
 
 `run` exits 0 when every run is done, 1 when some failed, and 3 when it stopped at a plan usage
-limit. Run the same command again after the reset; finished runs are skipped.
+limit. Run the same command again after the reset; finished runs are skipped. Before starting,
+it refuses finished board runs made with an older plugin (move them aside, for example into
+eval/results/superseded/, to re-run them), and a member run alone whose brief is unchanged since
+a full run of the same PR and repeat.
+
+A single-member run (PLAN 6.7) runs one member and its verifiers on development PRs only, into
+the variant folder `board-<id>`, with the same repeat numbers as the full runs it is scored with.
 
 Repositories go to --data-dir, outside this repository, so a reviewer working in them can't read
 the golden comments. The default is $BOARD_EVAL_DATA, or ~/board-review-data.
@@ -30,7 +38,10 @@ from pathlib import Path
 from eval.runner import martian
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
-from eval.runner.run import VARIANTS, Paths, RunSpec, check_claude, command_for, is_done, run_one
+from eval.runner.run import (
+    PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name, run_one,
+    stale_reason,
+)
 from eval.runner.split import Split, make_split, write_frozen
 
 
@@ -57,7 +68,6 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("run", help="run variants through claude -p (Y4)")
     _add_selection(run)
-    run.add_argument("--cache-dir", type=Path, default=ROOT / "eval" / "cache")
     run.add_argument("--config-dir", type=Path, default=Path.home() / ".claude-bench")
     run.add_argument("--claude", default="claude", help="the pinned standalone Claude Code")
     run.add_argument("--dry-run", action="store_true", help="print the commands; run nothing")
@@ -88,11 +98,15 @@ def _add_selection(p: argparse.ArgumentParser) -> None:
     which.add_argument("--smoke-repo", type=Path, help="a repository from eval/smoke/make_repo.sh")
     p.add_argument("--base", help="base SHA, with --smoke-repo")
     p.add_argument("--head", help="head SHA, with --smoke-repo")
-    p.add_argument("--members", default="full", help="board roster; anything but full only with --smoke-repo")
+    p.add_argument(
+        "--members", default="full",
+        help="board roster: full, one member id on development PRs, or several ids with --smoke-repo",
+    )
     p.add_argument("--intent-file", type=Path, help="PR title and description, with --smoke-repo")
     p.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
     p.add_argument("--data-dir", type=Path, default=_default_data_dir())
     p.add_argument("--results-dir", type=Path, default=ROOT / "eval" / "results")
+    p.add_argument("--cache-dir", type=Path, default=ROOT / "eval" / "cache")
 
 
 def _fetch(args: argparse.Namespace) -> int:
@@ -143,9 +157,14 @@ def _split(args: argparse.Namespace) -> int:
 
 def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     variants = VARIANTS if args.variant == "both" else (args.variant,)
+    single_member = args.members != "full" and not args.smoke_repo
+    if single_member:
+        if "," in args.members:
+            raise SystemExit("one member at a time on benchmark PRs; several ids are for --smoke-repo")
+        known = sorted(p.stem for p in (PLUGIN_DIR / "skills" / "review" / "members").glob("*.md"))
+        if args.members not in known:
+            raise SystemExit(f"unknown member {args.members!r}; valid ids: {', '.join(known)}")
     if args.members != "full":
-        if not args.smoke_repo:
-            raise SystemExit("--members is for smoke tests; benchmark runs use the full board")
         variants = tuple(f"board-{args.members.replace(',', '+')}" if v == "board-full" else v for v in variants)
     if args.smoke_repo:
         if not (args.base and args.head):
@@ -154,14 +173,17 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
         targets = [("smoke", "smoke", args.smoke_repo.resolve(), args.base, args.head, intent)]
     else:
         prs = {pr.id: pr for pr in read_jsonl(args.dataset_dir / "prs.jsonl", PullRequest)}
+        split = Split.model_validate_json((args.dataset_dir / "split.json").read_text(encoding="utf-8"))
         if args.prs:
             ids = args.prs.split(",")
         else:
-            split = Split.model_validate_json((args.dataset_dir / "split.json").read_text(encoding="utf-8"))
             ids = split.dev + split.test if args.set == "all" else getattr(split, args.set)
         for pr_id in ids:
             if pr_id not in prs or not prs[pr_id].runnable:
                 raise SystemExit(f"{pr_id} is not a runnable PR in prs.jsonl")
+        # Members are tuned on development PRs only (PLAN 6.6); test results stay unseen until the end.
+        if single_member and (not_dev := [i for i in ids if i not in split.dev]):
+            raise SystemExit(f"single-member runs are for development PRs only; not development: {', '.join(not_dev)}")
         dataset = args.dataset_dir.name
         targets = [
             (dataset, i, args.data_dir.resolve() / "prs" / f"{i}.git", prs[i].base, prs[i].head, prs[i].intent)
@@ -180,10 +202,12 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
 def _pack(args: argparse.Namespace) -> int:
     specs = _run_specs(args)
     which = args.set or ("smoke" if args.smoke_repo else f"{len(specs)}runs")
+    if args.members != "full":
+        which += f"-{args.members.replace(',', '+')}"
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M")
     out = args.out or args.results_dir / "packs" / f"{specs[0].dataset}-{which}-r{args.repeat}-{stamp}.zip"
     packed, skipped = pack_runs(
-        args.results_dir, [(s.dataset, s.variant, s.pr_id, s.repeat) for s in specs], out
+        args.results_dir, args.cache_dir, [(s.dataset, s.variant, s.pr_id, s.repeat) for s in specs], out
     )
     for name in skipped:
         print(f"  not packed: {name}")
@@ -200,16 +224,19 @@ def _run(args: argparse.Namespace) -> int:
     specs = _run_specs(args)
     if args.dry_run:
         for spec in specs:
-            state = "done" if is_done(paths, spec) else "to run"
-            print(f"{spec.dataset}/{spec.variant}/{spec.pr_id}/r{spec.repeat} ({state}) in {spec.repo}")
+            state = _refusal(paths, spec) or ("done" if is_done(paths, spec) else "to run")
+            print(f"{run_name(spec)} ({state}) in {spec.repo}")
             intent_file = Path("<intent-file>") if spec.intent and spec.variant.startswith("board-") else None
             print("  " + " ".join(command_for(spec, paths.claude, intent_file)[1:]))
         return 0
+    refused = [f"  {run_name(s)}: {reason}" for s in specs if (reason := _refusal(paths, s))]
+    if refused:
+        raise SystemExit("Nothing was started:\n" + "\n".join(refused))
 
     account = check_claude(paths)
     failed = 0
     for spec in specs:
-        name = f"{spec.dataset}/{spec.variant}/{spec.pr_id}/r{spec.repeat}"
+        name = run_name(spec)
         if is_done(paths, spec):
             print(f"{name}: done, skipped")
             continue
@@ -220,6 +247,15 @@ def _run(args: argparse.Namespace) -> int:
             return 3
         failed += meta.status != "ok"
     return 1 if failed else 0
+
+
+def _refusal(paths: Paths, spec: RunSpec) -> str | None:
+    """Why this run can't go ahead as it stands, or None."""
+    if reason := stale_reason(paths, spec):
+        return f"finished with an older plugin ({reason}); move it aside, for example into eval/results/superseded/"
+    if not is_done(paths, spec) and (source := cache_clash(paths, spec)):
+        return f"{spec.members} is unchanged since {source}; running it alone would overwrite that run's cache file"
+    return None
 
 
 if __name__ == "__main__":
