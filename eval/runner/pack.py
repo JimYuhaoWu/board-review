@@ -27,15 +27,21 @@ def pack_runs(
         for dataset, variant, pr_id, repeat in runs:
             name = f"{dataset}/{variant}/{pr_id}/r{repeat}"
             run = results / name
-            meta = run / "meta.json"
-            status = json.loads(meta.read_text(encoding="utf-8")).get("status") if meta.exists() else "missing"
-            if status != "ok":
-                skipped.append(f"{name} ({status})")
+            meta_path = run / "meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {"status": "missing"}
+            if meta.get("status") != "ok":
+                skipped.append(f"{name} ({meta.get('status')})")
                 continue
             for path in sorted(p for p in run.rglob("*") if p.is_file()):
                 zf.write(path, (Path("eval/results") / path.relative_to(results)).as_posix())
-            for path in sorted((cache / dataset / pr_id / f"r{repeat}").rglob("*.json")):
-                if json.loads(path.read_text(encoding="utf-8")).get("source_run") == name:
+            # A run moved aside and run again keeps its name, so the old run's cache files also
+            # carry this source_run; only the ones at this run's hashes are its own.
+            hashes = meta.get("skill_hashes", {})
+            for path in sorted((cache / dataset / pr_id / f"r{repeat}").glob(f"*/{meta.get('config_hash')}/*.json")):
+                member = path.parent.parent.name.partition("@")[0]
+                if path.stem == hashes.get(f"member:{member}") and json.loads(
+                    path.read_text(encoding="utf-8")
+                ).get("source_run") == name:
                     zf.write(path, (Path("eval/cache") / path.relative_to(cache)).as_posix())
             packed.append(name)
         manifest = {
