@@ -85,13 +85,16 @@ def member_cards(
     - runs: how many runs the member ran in (triggers skip some);
     - own categories: golden comments in the categories its brief targets that it found,
       next to what `/code-review` (baseline) found on the same PRs, and the total;
-    - contribution: board F1 minus the F1 of the board without it, with a paired bootstrap
-      over PRs (positive: the member helps);
+    - unique: golden comments it found that no other member found;
+    - marginal recall: board recall minus the recall of the board without it, with a paired
+      bootstrap over PRs. This is the primary member metric for the full board (PLAN 6.5);
+    - contribution: the same difference in F1, which matters for the default board;
     - usage share: its share of the price-weighted usage of all members and verifiers.
     """
     allowed = LABEL_FILTERS[labels]
     members = members_in(records)
     full = _units(records, None, labels, profile)
+    unique = {s["member"]: s["unique"] for s in member_stats(records, profile, labels)}
     base = defaultdict(lambda: defaultdict(list))  # pr -> category -> [(found, total)] per repeat
     for (pid, _), res in baseline.items():
         if res.get("skipped"):
@@ -125,9 +128,12 @@ def member_cards(
         )
         without = _units(records, frozenset(m for m in members if m != member), labels, profile)
         b = bootstrap(full, without, n=n_boot)
+        rb = bootstrap(full, without, "recall", n=n_boot)
         cards.append({
             "member": member, "runs": runs, "categories": sorted(cats),
             "own_found": own, "own_found_baseline": cr_found, "own_total": own_total,
+            "unique": unique.get(member, 0),
+            "recall_without": summarize(without)["recall"], "marginal_recall": rb["point"], "recall_ci95": rb["ci95"],
             "f1_without": summarize(without)["f1"], "contribution": b["point"], "ci95": b["ci95"],
             "usage_share": usage.get(member, 0.0) / total_usage if total_usage else 0.0,
         })

@@ -4,6 +4,7 @@
     uv run python -m eval.scoring report  --dataset martian --judge deepseek-flash --split dev
     uv run python -m eval.scoring members --dataset martian --judge deepseek-flash --split dev
     uv run python -m eval.scoring subsets --dataset martian --judge deepseek-flash --split dev
+    uv run python -m eval.scoring gate2   --dataset martian --judge deepseek-flash --split dev
 
 See eval/scoring/README.md.
 """
@@ -180,14 +181,18 @@ def cmd_members(args) -> None:
     if args.member:
         cards = [c for c in cards if c["member"] in args.member.split(",")]
     print(f"\n**Member cards** (PLAN 6.5). Own categories: golden comments in the categories the brief targets, "
-          f"found by the member / by `/code-review` on the same PRs / in total, all profiles. Contribution: board F1 "
-          f"minus the F1 without the member (positive helps), paired bootstrap over {len({r['pr_id'] for r in records})} PRs.\n")
-    print("| Member | Runs | Own categories | Found: member / `/code-review` / total | F1 without it | Contribution (95% CI) | Usage share |")
-    print("|---|---|---|---|---|---|---|")
+          f"found by the member / by `/code-review` on the same PRs / in total, all profiles. Unique: golden comments "
+          f"no other member found, summed over runs. Marginal recall (primary) and F1 contribution: the board's value "
+          f"minus its value without the member (positive helps), paired bootstrap over {len({r['pr_id'] for r in records})} PRs.\n")
+    print("| Member | Runs | Own categories | Found: member / `/code-review` / total | Unique | Marginal recall (95% CI) "
+          "| F1 contribution (95% CI) | Usage share |")
+    print("|---|---|---|---|---|---|---|---|")
     for c in cards:
         lo, hi = c["ci95"]
+        rlo, rhi = c["recall_ci95"]
         print(f"| {c['member']} | {c['runs']}/{len(records)} | {', '.join(c['categories']) or 'none'} | "
-              f"{c['own_found']:g} / {c['own_found_baseline']:g} / {c['own_total']} | {c['f1_without']:.1%} | "
+              f"{c['own_found']:g} / {c['own_found_baseline']:g} / {c['own_total']} | {c['unique']} | "
+              f"{c['marginal_recall']:+.1%} ({rlo:+.1%} to {rhi:+.1%}) | "
               f"{c['contribution']:+.1%} ({lo:+.1%} to {hi:+.1%}) | {c['usage_share']:.0%} |")
     if usage.get("verifier"):
         print(f"\nVerifiers: {usage['verifier'] / sum(usage.values()):.0%} of the usage.")
@@ -280,6 +285,50 @@ def cmd_gate1b(args) -> None:
     print(f"\nWritten to {report.relative_to(ROOT)}")
 
 
+GATE2_REPEATS = 2
+
+
+def cmd_gate2(args) -> None:
+    """PLAN Phase 3, Gate 2 as pre-registered on 2026-11-04: the full board's recall
+    (CONFIRMED + PLAUSIBLE) must be higher than `/code-review`'s on the pilot PRs, with at
+    least two repeats per PR for each. Precision, F1, and the grouping loss are reported
+    as guardrails; they don't decide the gate."""
+    ids = pr_ids(args)
+    names = ["board:full:cp", "code-review", "board:full:cp:ungrouped"]
+    res = {n: _results(args, parse_view(n), ids) for n in names}
+    units = {n: per_pr(r, args.profile) for n, r in res.items()}
+    print(f"\n## Gate 2: {args.dataset}, split {args.split}, judge {args.judge}, profile {args.profile}\n")
+    print("| View | PRs | Runs | Precision | Recall | F1 |")
+    print("|---|---|---|---|---|---|")
+    for n in names:
+        s = summarize(units[n])
+        print(f"| {n} | {s['prs']} | {len(res[n])} | {s['precision']:.1%} | {s['recall']:.1%} | {s['f1']:.1%} |")
+    board, cr = units["board:full:cp"], units["code-review"]
+    rows = [("ΔRecall (decides)", bootstrap(board, cr, "recall", n=args.bootstrap)),
+            ("ΔPrecision", bootstrap(board, cr, "precision", n=args.bootstrap)),
+            ("ΔF1", bootstrap(board, cr, "f1", n=args.bootstrap))]
+    print("\n| Paired bootstrap, board − `/code-review` | Point | 95% CI | p |")
+    print("|---|---|---|---|")
+    for label, b in rows:
+        pv = "n/a" if b.get("p_two_sided") is None else format(b["p_two_sided"], ".3f")
+        print(f"| {label} | {b['point']:+.1%} | {b['ci95'][0]:+.1%} to {b['ci95'][1]:+.1%} | {pv} |")
+    loss = summarize(units["board:full:cp:ungrouped"])["tp"] - summarize(board)["tp"]
+    print(f"\nGrouping loss: {loss:g} golden comments matched by a finding but missing from the report.")
+    short = {}
+    scored = {pid for n in ("board:full:cp", "code-review") for pid, _ in res[n]}  # the pilot PRs that were run
+    for n in ("board:full:cp", "code-review"):
+        per = Counter(pid for pid, _ in res[n])
+        missing = sorted(pid for pid in scored if per.get(pid, 0) < GATE2_REPEATS)
+        if missing:
+            short[n] = missing
+    if short:
+        print(f"\nNOT DECIDED: the rule needs {GATE2_REPEATS} repeats per PR; too few for "
+              + "; ".join(f"{n} ({', '.join(v)})" for n, v in short.items()))
+        return
+    passed = rows[0][1]["point"] > 0
+    print(f"\n**Gate 2: {'PASS' if passed else 'FAIL'}** (board recall {'>' if passed else '≤'} `/code-review` recall)")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -299,13 +348,20 @@ def main() -> None:
     j.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy or unreachable endpoint before stopping")
     j.add_argument("--force", action="store_true", help="re-judge records that already exist")
     r = sub.choices["report"]
-    r.add_argument("--views", nargs="+", help="code-review | code-review@whole | board-full@whole | board:<full|default|id,id>:<confirmed|cp|raw>")
+    r.add_argument("--views", nargs="+", help="code-review | code-review@whole | board-full@whole | board:<full|default|id,id>:<confirmed|cp|raw>[:ungrouped]")
     r.add_argument("--compare", nargs="+", help="pairs A,B for the paired bootstrap")
     r.add_argument("--categories", action="store_true", help="recall per golden category")
     for name in ("members", "subsets"):
         sub.choices[name].add_argument("--labels", choices=["confirmed", "cp", "raw"], default="cp")
     sub.choices["subsets"].add_argument("--top", type=int, default=15)
     sub.choices["members"].add_argument("--member", help="comma-separated ids: print only their cards")
+    g2 = sub.add_parser("gate2", help="full-board recall vs /code-review on the pilot PRs (PLAN Phase 3)")
+    g2.add_argument("--dataset", required=True)
+    g2.add_argument("--judge", required=True)
+    g2.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    g2.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+    g2.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    g2.add_argument("--bootstrap", type=int, default=2000, help="bootstrap resamples")
     g = sub.add_parser("gate1b", help="local-judge agreement with the published judges (PLAN Phase 3)")
     g.add_argument("--judge", required=True)
     g.add_argument("--martian-dir", help="the pinned Martian clone's offline/ folder (or set MARTIAN_DIR)")
@@ -337,7 +393,7 @@ def main() -> None:
     elif args.cmd == "gate1":
         cmd_gate1(args)
     else:
-        {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets}[args.cmd](args)
+        {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ Your prompt gives you: a member brief to read, the output schema, the repository
 - **Your focus only.** If you notice something outside your focus, leave it. Another member covers it.
 - **Evidence or nothing.** Every finding needs a concrete trace: the trigger (input, state, or sequence), the path through the code with file:line citations, and the wrong outcome. If a step is inferred rather than seen in the code, write "inference:" before it and lower your confidence.
 - **Material only.** Report what a careful senior engineer would want fixed before merging. No style or naming remarks unless your brief is about style. No "consider adding" suggestions without a concrete failure.
-- **One finding per root cause.** Don't report the same bug at several call sites. Cite the root cause, and mention other affected sites in the evidence.
+- **One finding per root cause, one root cause per finding.** Don't report the same bug at several call sites: cite the root cause, and mention other affected sites in the evidence. Don't put two different problems in one finding: if you found two, report two.
 - **Budget.** At most the number of findings in your prompt. Fewer, stronger findings beat many weak ones. Zero findings is a valid answer.
 - **Keep it short.** `claim` is one sentence, at most 200 characters. `evidence` is at most 600 characters: cite file:line instead of quoting code. `fix_hint` is at most 150 characters. Intern explanations are at most 300 characters each.
 - **Point at the head version.** `file` is relative to the repository root, and `line` is a line number in the head version.

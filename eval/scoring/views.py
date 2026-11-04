@@ -27,16 +27,18 @@ class View:
     variant: str
     members: frozenset[str] | None = None
     labels: frozenset[str] | None = None
+    ungrouped: bool = False  # diagnostic: every finding counts, not one per board group
 
 
 def parse_view(spec: str) -> View:
     """`code-review`, `code-review@whole`, `board-full@whole`, or
-    `board:<full|default|id,id>:<confirmed|cp|raw>`."""
+    `board:<full|default|id,id>:<confirmed|cp|raw>`, optionally ending in `:ungrouped`."""
     if spec in ("code-review", "code-review" + WHOLE, "board-full" + WHOLE):
         return View(spec, spec)
     parts = spec.split(":")
-    if parts[0] != "board" or len(parts) != 3 or parts[2] not in LABEL_FILTERS:
-        raise ValueError(f"bad view {spec!r}; use code-review, code-review@whole, board-full@whole, or board:<roster>:<confirmed|cp|raw>")
+    ungrouped = len(parts) == 4 and parts[3] == "ungrouped"
+    if parts[0] != "board" or len(parts) not in (3, 4) or parts[2] not in LABEL_FILTERS or (len(parts) == 4 and not ungrouped):
+        raise ValueError(f"bad view {spec!r}; use code-review, code-review@whole, board-full@whole, or board:<roster>:<confirmed|cp|raw>[:ungrouped]")
     roster = parts[1]
     if roster == "full":
         members = None
@@ -44,7 +46,7 @@ def parse_view(spec: str) -> View:
         members = frozenset(default_roster())
     else:
         members = frozenset(roster.split(","))
-    return View(spec, "board-full", members, LABEL_FILTERS[parts[2]])
+    return View(spec, "board-full", members, LABEL_FILTERS[parts[2]], ungrouped)
 
 
 def select(record: dict, view: View) -> tuple[list[int], list[list[int]] | None]:
@@ -52,12 +54,14 @@ def select(record: dict, view: View) -> tuple[list[int], list[list[int]] | None]
 
     For the board, only each group's representative finding counts: the first finding of
     the group among the view's members, as the board's report shows one item per group.
+    An ungrouped view counts every finding instead; the difference between the two is
+    what the board's grouping loses (PLAN 6.5).
     """
     in_view = [
         f for f in record.get("findings", [])
         if (view.members is None or f["member"] in view.members) and (view.labels is None or f["label"] in view.labels)
     ]
-    kept = {f["id"] for f in representatives(in_view)}
+    kept = {f["id"] for f in (in_view if view.ungrouped else representatives(in_view))}
     idx = [
         i
         for i, c in enumerate(record["candidates"])

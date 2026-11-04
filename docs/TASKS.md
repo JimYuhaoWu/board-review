@@ -52,9 +52,25 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y5 | **Review the skill pull request** (J1) as a second reader | review comments on the pull request | ✅ review of #8, addressed in #10 |
 | Y7 | **Single-member runs** (PLAN 6.7): run one new or edited member, with its verifiers, on the development PRs, using only that member's usage. See "Testing one member" below | `run --variant board-full --members <id> --set dev --repeat N` writes `board-<id>` runs and the member's cache file; `pack` packs them; tests cover the refusals | ✅ 2026-11-04. Two additions: `run` stops before starting on finished board runs made with an older plugin, and refuses a member whose brief is unchanged since the full run of the same PR and repeat, because the cache path doesn't name the variant and the single run would overwrite the full run's cache file |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
+| Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ☐ |
 | — | Runs on account B (Phases 3–5), as assigned in PLAN 7.3 | | later |
 
 Y1–Y4 cost no Claude usage, except a few smoke-repo runs to test Y4.
+
+## Third pilot (Y8)
+
+The design changed after the second pilot failed Gate 2 (PLAN Phase 3): four new members (`line-reader`, `regression`, `boundary`, `test-auditor`), so the full roster has 12; a tighter grouping rule in `SKILL.md`; and "one problem per finding" in `board-member.md`. The new Gate 2 rule compares **recall**, with **2 repeats per PR for both variants**, so `/code-review` needs a second repeat too.
+
+1. Pull `main` and check the commit you run is the one that adds the four members (`git log -1`).
+2. **Move the old board runs aside**, because the runner skips any finished run whatever its plugin hash: move `eval/results/martian/board-full/` to `eval/results/superseded/board-full-pilot-893973e/`. Keep `eval/results/martian/code-review/` where it is: its repeat 1 counts.
+3. Check with `--dry-run` first: every board run should say `to run`, and `/code-review` repeat 1 `done`. Then run, in this order, so a usage stop leaves complete pairs first:
+   - `uv run python -m eval.runner run --variant board-full --set pilot --repeat 1`
+   - `uv run python -m eval.runner run --variant code-review --set pilot --repeat 2`
+   - `uv run python -m eval.runner run --variant board-full --set pilot --repeat 2`
+4. Check: every run `ok`, `permission_denials` 0, and `members.ran` in `final.json` lists the members whose triggers matched. A member that failed shows up in `members.failed`: report it, don't re-run silently.
+5. Pack both repeats, `uv run python -m eval.runner pack --variant both --set pilot --repeat 1` and the same with `--repeat 2`, and send both zips. Note anything unusual in your session notes, as before: denials, skipped members, a much longer run.
+
+**Budget.** The last pilot cost $7.30 for 10 board runs with 8 members. With 12 members expect about $10–12 per repeat, so about $25 for both repeats; `/code-review` adds under $1.
 
 ## Testing one member (Y7 and J5)
 

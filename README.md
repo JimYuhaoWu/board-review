@@ -36,6 +36,10 @@ The review is read-only. Ask Claude to fix the CONFIRMED findings afterwards if 
 | `concurrency` | Races, ordering, stale state (runs when relevant) | no |
 | `contract` | Interface, schema, and signature breakage (runs when relevant) | no |
 | `perf` | Complexity and query patterns (runs when relevant) | no |
-| `nitpicker` | Naming, duplication, structure | no |
+| `nitpicker` | Text that is wrong: names, docs, comments, messages | no |
+| `line-reader` | Every changed line: won't parse or run, wrong conditions, variables, indices | no |
+| `regression` | Old behavior the change drops: defaults, migrations, removed steps (runs when relevant) | no |
+| `boundary` | Values crossing serialization, storage, processes, and external APIs | no |
+| `test-auditor` | Tests that can't catch what they claim to (runs when relevant) | no |
 
 A member is one Markdown file in `plugin/skills/review/members/`. See PLAN section 6 for adding one.
