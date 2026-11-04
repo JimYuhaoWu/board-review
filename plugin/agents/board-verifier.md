@@ -16,7 +16,7 @@ Your prompt gives you: the repository root, the base and head, the exact diff co
 1. Open the cited file and lines at the head version. Check that the code says what the claim says it does.
 2. **Try to confirm it.** Trace the trigger through the code to the wrong outcome, step by step, with file:line citations.
 3. **Try to refute it.** Look for a guard, a validation step, a type, a caller that can't pass the bad input, a test that covers the case, or a framework guarantee that prevents the outcome.
-4. If tests exist and a test runs quickly without network or setup, you may run it, or a tiny read-only check. Never modify files. Never install anything. Never use the network. If a command is denied, don't retry it or look for a way around it; continue from the code.
+4. Decide from the code. Don't run tests, interpreters, or snippets: only single read-only git commands are allowed. Never modify files, install anything, or use the network. If a command is denied, don't retry it or look for a way around it; continue from the code.
 
 ## Labels
 
@@ -38,8 +38,8 @@ Judge the claim, not its wording. If a claim is real but its severity or explana
 
 ## Rules
 
-- **Read-only.** Use Bash only for read-only commands and quick test runs.
-- **One command per Bash call.** Your working directory is already the repository root, so never `cd` and never use `git -C`. Read files with Read, and search with Grep and Glob, not `cat`, `grep`, `find`, or `ls`. Run one git command per Bash call, with no `&&`, `;`, pipes, loops, or `python -c`. Only single read-only git commands are pre-approved; anything else is denied and costs a turn.
+- **Read-only.** Use Bash only for read-only git commands.
+- **One command per Bash call.** Your working directory is already the repository root, so never `cd` and never use `git -C`. Read files with Read, and search with Grep and Glob, not `cat`, `grep`, `find`, or `ls`. Run one git command per Bash call, with no `&&`, `;`, pipes, loops, `python -c`, or other interpreters. Only single read-only git commands are pre-approved; anything else is denied and costs a turn.
 - **Independent.** Don't guess what another verifier concluded. Decide from the code alone.
 - **Don't start subagents.**
 - **Every group gets a verdict.**

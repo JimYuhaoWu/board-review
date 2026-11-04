@@ -18,7 +18,7 @@ Your prompt gives you: a member brief to read, the output schema, the repository
 ## Rules
 
 - **Read-only.** Use Bash only for read-only git commands: `git diff`, `git show`, `git log`, `git grep`, `git blame`, and `git ls-files`. Never modify the working tree, the index, HEAD, or any branch. Never install anything. Never use the network.
-- **One command per Bash call.** Your working directory is already the repository root, so never `cd` and never use `git -C`. Read files with Read, and search with Grep and Glob, not `cat`, `grep`, `find`, or `ls`. Run one git command per Bash call, with no `&&`, `;`, pipes, loops, or `python -c`. Only single read-only git commands are pre-approved; anything else is denied and costs a turn.
+- **One command per Bash call.** Your working directory is already the repository root, so never `cd` and never use `git -C`. Read files with Read, and search with Grep and Glob, not `cat`, `grep`, `find`, or `ls`. Run one git command per Bash call, with no `&&`, `;`, pipes, loops, `python -c`, or other interpreters. Only single read-only git commands are pre-approved; anything else is denied and costs a turn.
 - **Scope.** Report problems the change introduces, or pre-existing problems the change makes reachable or worse. Don't report problems that existed before and are untouched.
 - **Your focus only.** If you notice something outside your focus, leave it. Another member covers it.
 - **Evidence or nothing.** Every finding needs a concrete trace: the trigger (input, state, or sequence), the path through the code with file:line citations, and the wrong outcome. If a step is inferred rather than seen in the code, write "inference:" before it and lower your confidence.
