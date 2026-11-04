@@ -65,6 +65,75 @@ def member_stats(records: list[dict], profile: str, labels: str = "cp") -> list[
     return rows
 
 
+def _units(records: list[dict], members: frozenset[str] | None, labels: str, profile: str) -> dict:
+    name = ",".join(sorted(members)) if members is not None else "full"
+    view = View(f"board:{name}:{labels}", "board-full", members, LABEL_FILTERS[labels])
+    return per_pr({(r["pr_id"], r["repeat"]): score(r, view) for r in records}, profile)
+
+
+def member_cards(
+    records: list[dict],
+    baseline: dict[tuple[str, int], dict],
+    categories: dict[str, list[str]],
+    usage: dict[str, float],
+    profile: str,
+    labels: str = "cp",
+    n_boot: int = 2000,
+) -> list[dict]:
+    """PLAN 6.5, one card per member, over the given board runs:
+
+    - runs: how many runs the member ran in (triggers skip some);
+    - own categories: golden comments in the categories its brief targets that it found,
+      next to what `/code-review` (baseline) found on the same PRs, and the total;
+    - contribution: board F1 minus the F1 of the board without it, with a paired bootstrap
+      over PRs (positive: the member helps);
+    - usage share: its share of the price-weighted usage of all members and verifiers.
+    """
+    allowed = LABEL_FILTERS[labels]
+    members = members_in(records)
+    full = _units(records, None, labels, profile)
+    base = defaultdict(lambda: defaultdict(list))  # pr -> category -> [(found, total)] per repeat
+    for (pid, _), res in baseline.items():
+        if res.get("skipped"):
+            continue
+        c = defaultdict(lambda: [0, 0])
+        for t in res["true_positives"]:
+            c[t.get("category")][0] += 1
+        for t in res["true_positives"] + res["false_negatives"]:
+            c[t.get("category")][1] += 1
+        for cat, v in c.items():
+            base[pid][cat].append(v)
+    prs = {r["pr_id"] for r in records}
+    total_usage = sum(usage.values())
+    cards = []
+    for member in members:
+        cats = set(categories.get(member, []))
+        runs = sum(member in r.get("members", {}).get("ran", []) or any(c["member"] == member for c in r["candidates"])
+                   for r in records)
+        found = defaultdict(list)  # pr -> golden comments in its categories found, per run
+        for r in records:
+            hits = set()
+            for c, m in zip(r["candidates"], _matches(r, "all"), strict=True):
+                if c["member"] == member and (allowed is None or c["label"] in allowed):
+                    hits |= {gi for gi in m if r["golden"][gi].get("category") in cats}
+            found[r["pr_id"]].append(len(hits))
+        own = sum(sum(v) / len(v) for v in found.values())
+        cr_found = sum(sum(f for f, _ in base[pid][cat]) / len(base[pid][cat])
+                       for pid in prs for cat in cats if base[pid][cat])
+        own_total = sum(
+            sum(1 for g in r["golden"] if g.get("category") in cats) for r in {r["pr_id"]: r for r in records}.values()
+        )
+        without = _units(records, frozenset(m for m in members if m != member), labels, profile)
+        b = bootstrap(full, without, n=n_boot)
+        cards.append({
+            "member": member, "runs": runs, "categories": sorted(cats),
+            "own_found": own, "own_found_baseline": cr_found, "own_total": own_total,
+            "f1_without": summarize(without)["f1"], "contribution": b["point"], "ci95": b["ci95"],
+            "usage_share": usage.get(member, 0.0) / total_usage if total_usage else 0.0,
+        })
+    return cards
+
+
 def label_stats(records: list[dict], profile: str) -> dict:
     """Finding precision per label, the wrongful-refutation rate, and golden comments
     that the raw union found but CONFIRMED + PLAUSIBLE lost."""

@@ -24,7 +24,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 - `<config-hash>`: the rest of the PLAN 6.2 cache key, which changes a member's labeled findings: effort, Claude Code version, and the hashes of `SKILL.md`, `schema.json`, `roster.json`, and both agent files. `meta.json` lists the inputs as `skill_hashes` and `config_hash`.
 - A cache file holds `member`, `status` (`ran`, or `skipped` with the trigger `reason`), its `findings` as in `final.json` (with `group` and `label`), the intern's `explanations`, and `source_run`. A failed member gets no file.
 
-- `<variant>`: `code-review` or `board-full`. The default board (b) is never run; scoring computes it from `board-full`.
+- `<variant>`: `code-review`, `board-full`, or `board-<id>` for a single-member run (Y7). The default board (b) is never run; scoring computes it from `board-full`.
 - `<pr_id>` and `<dataset>` come from `eval/datasets/<dataset>/prs.jsonl` (Y1). `<pr_id>` must be usable as a folder name.
 - `split.json` (Y3): `{"seed": <int>, "dev": [pr_id, ...], "test": [pr_id, ...]}`.
 - Scoring writes its own records to `eval/results/<dataset>/judged/` (git-ignored). `eval/datasets/smoke/` is a one-PR example of the dataset format.
@@ -37,6 +37,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 | J2 | **Scoring:** run Martian's extract, dedup, and judge steps unchanged; subset scoring (PLAN 6.2); metrics and the paired bootstrap. See `eval/scoring/README.md` | ✅ built and tested offline; reproduces Martian's published numbers. The live smoke check stopped at the endpoint quota, with the board's per-finding record still to judge |
 | J3 | **Judge gates:** Gate 1 with one paid published judge; Gate 1b for each local judge, including a repeat to test temperature-0 repeatability; a drift check at each judging session (re-judge a fixed sample of pairs), because the endpoint reports no model version. Pace calls for the shared endpoint (PLAN 5.1) | `gate1` (Sonnet 4.5 on OpenRouter) and `gate1b` with the repeat check built; Gate 1 **passed** 2026-11-03 (96.5% agreement, F1 40.1% vs 38.7%); Gate 1b for `deepseek-flash` **passed** 2026-11-04 (mean tau +0.97 vs floor +0.90; repeat check 200/200 same) |
 | J4 | **Skill support for Phase 4b:** `model:` in member briefs, and `--verifier-model` | ☐, only if Y6 goes ahead |
+| J5 | **Member card and combined scoring** (PLAN 6.5, 6.7): the card in `python -m eval.scoring members`; scoring a single-member run (Y7) combined with the other members' findings from the full run. See "Testing one member" below | card ✅ (2026-11-04); combined scoring ☐, needs Y7 |
 
 Judging runs only on account A's machine, because the local endpoint key is personal.
 
@@ -49,10 +50,54 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y3 | **Freeze the split** (PLAN Phase 3 step 1), before any result exists | `eval/datasets/martian/split.json`: about 15 development and 25 test PRs from the runnable ones, stratified by repo, with the random seed recorded. Never changed afterwards | ✅ all 45 runnable PRs: 15 development, 30 test (3 development per repo), seed 20261103, plus the 10 pilot PRs. `python -m eval.runner split` refuses to overwrite it |
 | Y4 | **Runner** (PLAN Phase 2, steps 2–4 and 7) | For one (variant, PR, repeat): a fresh worktree at the head commit, the pinned `claude -p` command with `--model`, `--effort`, `--plugin-dir`, the allowed and disallowed tools, and the clean `CLAUDE_CONFIG_DIR`. It checks the `init` event, detects usage-limit stops and resumes later, and writes the layout above. Test it on the smoke repo (`eval/smoke/`), not on benchmark PRs. Parse `final.json` tolerantly: strip a code fence, and restore a missing opening `{`. The campus model dropped it once in the smoke test. Record a repaired parse in `meta.json`. Intent (PLAN 5.1): write the PR title and description to a file outside the worktree and pass `--intent-file` to the board. For `/code-review`, first test on the smoke repo that the same text after the target leaves its review range unchanged; if it doesn't, give the text to neither variant and tell Jim. For `/code-review`, a rejected first `ReportFindings` call (for example `short_summary` over 60 characters) is normal: the model retries it, so it isn't a failed run | ✅ `uv run python -m eval.runner run` (usage in `eval/runner/__main__.py`); smoke-tested on account B |
 | Y5 | **Review the skill pull request** (J1) as a second reader | review comments on the pull request | ✅ review of #8, addressed in #10 |
+| Y7 | **Single-member runs** (PLAN 6.7): run one new or edited member, with its verifiers, on the development PRs, using only that member's usage. See "Testing one member" below | `run --variant board-full --members <id> --set dev --repeat N` writes `board-<id>` runs and the member's cache file; `pack` packs them; tests cover the refusals | ☐ |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
 | — | Runs on account B (Phases 3–5), as assigned in PLAN 7.3 | | later |
 
 Y1–Y4 cost no Claude usage, except a few smoke-repo runs to test Y4.
+
+## Testing one member (Y7 and J5)
+
+**Why.** The pilot showed that one member can hold the board back: the Saboteur found 0 of the 7 security issues in its own category (`eval/reports/pilot-gate2-deepseek-flash.md`). The member card (`python -m eval.scoring members`) shows which member it is. Fixing a member means editing its brief and measuring it again. Re-running the whole board for that costs about $7 per pilot; running only the edited member costs its own share plus its verifiers. In the pilot, each member used 7–13% of the board's subagent usage, and the verifiers 20%.
+
+### Y7, the runner (Yara)
+
+1. **Allow `--members` on benchmark PRs.**
+   - Today `run` refuses `--members` without `--smoke-repo` (`eval/runner/__main__.py`, `_run_specs`).
+   - Allow exactly one member id, with `--set dev`, `--set pilot`, or `--prs` naming development PRs only.
+   - Refuse it with `--set test` or `--set all`, or with a test PR in `--prs`. Members are tuned on development PRs only (PLAN 6.6), so test runs would spend usage on numbers nobody may look at yet.
+   - Refuse an unknown id. The valid ids are the files in `plugin/skills/review/members/`.
+   - Several ids at once stay smoke-only.
+2. **The command** is the board with that roster: `/board-review:review --members <id> --max-findings 8 --format json ...`. The orchestrator runs that one member, then verifies only its findings, with the same pass 1 and pass 2 rules.
+   - The member's trigger still applies. If the trigger doesn't match a PR, the run ends with the member under `members.skipped`.
+   - Such a run is `ok`, and its cache file has `status: skipped` with the reason. Scoring needs to tell a skipped member from a missing run.
+3. **Where results go.**
+   - The variant folder is `board-<id>`, as the smoke convention already does: `eval/results/<dataset>/board-<id>/<pr_id>/r<repeat>/`, with the same files as `board-full`.
+   - Use the **same repeat numbers** as the full runs it will be combined with (`r1`, `r2`). Scoring pairs a single-member run with the full run of the same PR and repeat.
+   - `_write_cache` already writes the member's cache file. Its path differs from the full run's only in `<member-file-hash>`, because `<config-hash>` excludes member files. Keep it that way: an edited brief must give a new cache file next to the old one, never overwrite it.
+4. **`meta.json`** records the roster (`roster: <id>`) and, as now, `skill_hashes` with the member's file hash. Scoring checks that the hash matches the brief it is told to score.
+5. **Stale runs.**
+   - A `board-<id>` run is outdated when that member's file hash, or the `config_hash`, differs from the current plugin.
+   - Your proposed stop-on-stale check should cover this case: stop and list the stale runs, rather than skip them as done.
+   - Moving the old folder aside by hand stays the way to re-run.
+6. **`pack`** must accept `--variant board-full --members <id>` and pack the `board-<id>` runs.
+   - Also pack the cache files of the packed runs: `eval/cache/<dataset>/<pr_id>/r<repeat>/<id>@<model>/...`. Zips don't hold cache files today.
+   - Scoring reads the member's findings from `final.json`; the cache file is the check that the hashes agree.
+7. **Tests:**
+   - the refusals: a test PR, several ids on benchmark PRs, an unknown id;
+   - the `board-<id>` folder name;
+   - a skipped member gives an `ok` run with a `skipped` cache entry;
+   - `pack` includes the cache file.
+8. **Budget.** The pilot is 10 PRs × 1 repeat; the development split is 15 PRs × 2 repeats. Run the pilot first, as a mechanics check.
+
+### J5, scoring (Jim)
+
+Combine a `board-<id>` run with the full run of the same PR and repeat: take the full run's findings, drop that member's, and add the single-member run's findings, with their labels.
+
+- **Judging.** Only the new candidates need judge calls; the rest come from the full run's judged record.
+- **Grouping.** The board's `group` ids don't carry across runs, so a combined record groups duplicates with Martian's dedup over the union, and counts once per group as now. To compare like with like, the card compares it with the full board regrouped the same way.
+- **A known difference.** In a full run, a duplicate that two members found is verified once, as one group. In a combined record, each side keeps the label from its own run. Only duplicates are affected, and the card reports how many there are.
+- **Output.** The edited member's card, with the same columns as now, against the unedited full board. Promotion follows PLAN Phase 4's rule.
 
 ## Order
 

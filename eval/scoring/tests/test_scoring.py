@@ -194,6 +194,38 @@ def test_member_label_and_selection():
     assert out["best"]["f1"] == 1.0 and out["chosen"]["members"] == ("saboteur", "edge")
 
 
+def test_member_cards(tmp_path):
+    from eval.scoring.board import member_cards
+    from eval.scoring.data import member_categories, subagent_usage
+
+    rec = _record()
+    baseline = {("p1", 1): {"true_positives": [{"category": "security"}],
+                            "false_negatives": [{"category": "bug"}, {"category": "style"}]}}
+    cats = {"saboteur": ["security"], "edge": ["bug"], "intent": ["bug"], "nitpicker": ["style"]}
+    cards = {c["member"]: c for c in member_cards([rec], baseline, cats, {"saboteur": 1.0, "edge": 3.0}, "core", n_boot=20)}
+    assert (cards["saboteur"]["own_found"], cards["saboteur"]["own_found_baseline"], cards["saboteur"]["own_total"]) == (1, 1, 1)
+    assert (cards["edge"]["own_found"], cards["edge"]["own_found_baseline"]) == (1, 0)
+    assert cards["saboteur"]["contribution"] > 0  # only its CONFIRMED finding covers G-sql
+    assert cards["nitpicker"]["contribution"] < 0  # its one finding is a false positive
+    assert cards["edge"]["usage_share"] == 0.75 and cards["intent"]["usage_share"] == 0.0
+
+    assert "security" in member_categories("saboteur") and member_categories("no-such-member") == []
+    stream = tmp_path / "stream.jsonl"
+    events = [
+        {"message": {"content": [{"type": "tool_use", "name": "Agent", "id": "a1",
+                                  "input": {"prompt": "Member brief: read /x/members/edge.md"}}]}},
+        {"message": {"content": [{"type": "tool_use", "name": "Agent", "id": "a2",
+                                  "input": {"subagent_type": "board-review:board-verifier", "prompt": "verify"}}]}},
+        {"message": {"content": [{"type": "tool_result", "tool_use_id": "a1"}]},
+         "tool_use_result": {"usage": {"input_tokens": 10, "output_tokens": 2, "cache_read_input_tokens": 100,
+                                       "cache_creation": {"ephemeral_5m_input_tokens": 8}}}},
+        {"message": {"content": [{"type": "tool_result", "tool_use_id": "a2"}]},
+         "tool_use_result": {"usage": {"input_tokens": 1, "output_tokens": 0}}},
+    ]
+    stream.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    assert subagent_usage(stream) == {"edge": 10 + 10 + 10 + 10, "verifier": 1}
+
+
 def _fake_endpoint(jm, outcomes):
     """Point jm's judge client at a fake whose calls follow `outcomes`: 'busy', 'down', or 'ok'."""
     import httpx2 as httpx

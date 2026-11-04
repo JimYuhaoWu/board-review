@@ -53,6 +53,49 @@ def default_roster() -> list[str]:
     return json.loads(ROSTER_FILE.read_text(encoding="utf-8"))["default"]
 
 
+def member_categories(member: str, members_dir: Path = ROSTER_FILE.parent / "members") -> list[str]:
+    """The golden categories a member's brief targets (its `categories:` frontmatter)."""
+    path = members_dir / f"{member}.md"
+    if not path.exists():
+        return []
+    m = re.search(r"^categories:\s*\[([^\]]*)\]", path.read_text(encoding="utf-8"), re.MULTILINE)
+    return [c.strip() for c in m.group(1).split(",") if c.strip()] if m else []
+
+
+# Relative list prices per token type, so usage from different token types can be added up.
+_PRICE = {"input_tokens": 1.0, "output_tokens": 5.0, "cache_read_input_tokens": 0.1,
+          "ephemeral_5m_input_tokens": 1.25, "ephemeral_1h_input_tokens": 2.0}
+
+
+def subagent_usage(stream: Path) -> dict[str, float]:
+    """Price-weighted token usage per board member in one run's stream.jsonl, with all
+    verifiers under "verifier". Members are recognized by the brief their prompt names."""
+    who: dict[str, str] = {}
+    usage: dict[str, float] = {}
+    with open(stream, encoding="utf-8") as f:
+        for line in f:
+            event = json.loads(line)
+            content = (event.get("message") or {}).get("content") if isinstance(event.get("message"), dict) else None
+            for c in content if isinstance(content, list) else []:
+                if not isinstance(c, dict):
+                    continue
+                if c.get("type") == "tool_use" and c.get("name") in ("Agent", "Task"):
+                    inp = json.dumps(c.get("input"))
+                    m = re.search(r"members/([\w-]+)\.md", inp)
+                    who[c["id"]] = m.group(1) if m else "verifier" if "board-verifier" in inp else "other"
+                elif c.get("type") == "tool_result" and c.get("tool_use_id") in who:
+                    u = (event.get("tool_use_result") or {}).get("usage") if isinstance(event.get("tool_use_result"), dict) else None
+                    if not u:
+                        continue
+                    cost = sum(_PRICE[k] * u.get(k, 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"))
+                    cache = u.get("cache_creation") or {}
+                    cost += sum(_PRICE[k] * cache.get(k, 0) for k in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"))
+                    if not cache:
+                        cost += 1.25 * u.get("cache_creation_input_tokens", 0)
+                    usage[who[c["tool_use_id"]]] = usage.get(who[c["tool_use_id"]], 0.0) + cost
+    return usage
+
+
 @dataclass
 class Run:
     dataset: str
