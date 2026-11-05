@@ -52,7 +52,8 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y5 | **Review the skill pull request** (J1) as a second reader | review comments on the pull request | ✅ review of #8, addressed in #10 |
 | Y7 | **Single-member runs** (PLAN 6.7): run one new or edited member, with its verifiers, on the development PRs, using only that member's usage. See "Testing one member" below | `run --variant board-full --members <id> --set dev --repeat N` writes `board-<id>` runs and the member's cache file; `pack` packs them; tests cover the refusals | ✅ 2026-11-04. Two additions: `run` stops before starting on finished board runs made with an older plugin, and refuses a member whose brief is unchanged since the full run of the same PR and repeat, because the cache path doesn't name the variant and the single run would overwrite the full run's cache file |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
-| Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ☐ |
+| Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ✅ 2026-11-04, 40 runs. Gate 2 v2: FAIL |
+| Y9 | **Gate 2 on Qodo** (PLAN Phase 3). See "Qodo (Y9)" below | `prs.jsonl` and `split.json` for Qodo merged; board and `/code-review`, 2 repeats each, on the 24 sampled PRs, all `ok`, packed and sent | ☐ |
 | — | Runs on account B (Phases 3–5), as assigned in PLAN 7.3 | | later |
 
 Y1–Y4 cost no Claude usage, except a few smoke-repo runs to test Y4.
@@ -71,6 +72,24 @@ The design changed after the second pilot failed Gate 2 (PLAN Phase 3): four new
 5. Pack both repeats, `uv run python -m eval.runner pack --variant both --set pilot --repeat 1` and the same with `--repeat 2`, and send both zips. Note anything unusual in your session notes, as before: denials, skipped members, a much longer run.
 
 **Budget.** The last pilot cost $7.30 for 10 board runs with 8 members. With 12 members expect about $10–12 per repeat, so about $25 for both repeats; `/code-review` adds under $1.
+
+## Qodo (Y9)
+
+Gate 2 failed on Martian. The same rule is now tested on Qodo PR-Review-Bench, a dataset no brief was written from (PLAN Phase 3, "Gate 2 on Qodo"; `eval/datasets/qodo/SOURCE.md`). The plugin is unchanged since Y8, and no member is tuned.
+
+1. Pull `main`.
+2. **Fetch:** `uv run python -m eval.runner fetch --dataset qodo`. It clones the 8 forks under `agentic-review-benchmarks` into the data directory, about 3 GB (cal.com alone is about 1 GB), and builds one repository per PR. Report the runnable count; all 100 PRs were open with fetchable heads on 2026-11-05.
+3. **Freeze the sample**, before any run: `uv run python -m eval.runner split --dataset qodo --dev-per-repo 3 --pilot-per-repo 3 --seed 20261105`. That gives 24 PRs, 3 per repository. Open a pull request with `eval/datasets/qodo/prs.jsonl` and `split.json` only, and wait for it to be merged before running.
+4. **Run**, with `--dataset-dir eval/datasets/qodo` on every command (results go to `eval/results/qodo/`). Check with `--dry-run` first, then in this order, so a usage stop leaves complete pairs first:
+   - `uv run python -m eval.runner run --dataset-dir eval/datasets/qodo --variant board-full --set pilot --repeat 1`
+   - `uv run python -m eval.runner run --dataset-dir eval/datasets/qodo --variant code-review --set pilot --repeat 1`
+   - the same two with `--repeat 2`
+5. **Check** as in Y8: every run `ok`, `permission_denials` 0, `members.failed` empty. Report anything unusual rather than re-running silently.
+6. **Pack** each repeat: `uv run python -m eval.runner pack --dataset-dir eval/datasets/qodo --variant both --set pilot --repeat 1`, and the same with `--repeat 2`. Send both zips.
+
+**Don't open the PRs' GitHub pages or their comments.** Five Ghost PRs carry an outside comment that lists the injected issues (SOURCE.md). The reviewers can't reach it, and neither should anyone who might later look at the findings.
+
+**Budget.** Y8 cost $19.12 for 20 board runs, about $1 each. Qodo PRs are often larger (median 208 changed lines), so expect $1–1.5 per board run: about $50–70 for 48 board runs, plus about $4 for 48 `/code-review` runs. That's within the usage ceiling (PLAN section 7); if a usage stop comes first, run the same command again after the reset.
 
 ## Testing one member (Y7 and J5)
 

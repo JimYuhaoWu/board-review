@@ -179,7 +179,16 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
     - The gap is in the `bug` category (14.5 of 22 against 17 of 22). The board found more test gaps, style, and doc defects.
     - The pilot has 43 Core golden comments, so a 3.5-point gap is about 1.5 comments, and the CI can't separate the two variants.
     - Following the rule above, the briefs are not tuned. The members that could be tuned later are listed under "When members are tuned".
-    - **Next step, under discussion:** an external check on Qodo PR-Review-Bench (section 6.3), with its own rule written down before any run.
+    - **Next step:** Gate 2 on Qodo, below.
+- **Gate 2 on Qodo (external check).** Written on 2026-11-05, after the Martian result and before any Qodo run or split. It asks the same question as Gate 2 v2 on a dataset that no brief was written from, with about 1.7 times as many functional golden issues.
+  - **Dataset:** Qodo PR-Review-Bench at the pinned revision (`eval/datasets/qodo/SOURCE.md`). The sample is 3 PRs per repository, 24 in all, drawn by `split --dataset qodo --dev-per-repo 3 --pilot-per-repo 3 --seed 20261105` once `fetch` has recorded the runnable PRs. The sample is the development and pilot set; the other PRs are the test set and stay unused.
+  - **Rule:** the full board's **recall on functional bugs** (Core profile: category `bug`; findings labeled CONFIRMED or PLAUSIBLE) is higher than `/code-review`'s, judged by `deepseek-flash`.
+  - **Repeats:** 2 per PR for both variants (96 runs).
+  - **Reported, not deciding:** recall on all issues (All profile, with the repository-rule violations), the paired-bootstrap CIs, precision, F1, the grouping loss, the per-repository recall, and the member cards.
+  - **Judge check:** after judging, Jim labels about 60 of the judge's match / no-match verdicts on Qodo without seeing them, stratified by verdict. Agreement is reported. If it is below 85%, the result is NOT DECIDED until the disagreements are understood.
+  - **Command:** `uv run python -m eval.scoring gate2 --dataset qodo --judge deepseek-flash --split dev`, and `report --profile all` for all issues.
+  - **If it passes:** the board's recall advantage holds outside the data it was designed on. Both collaborators then decide how Phase 4 continues.
+  - **If it fails:** the full board doesn't beat `/code-review` on recall on either dataset. Stop, with a written analysis and a decision by both collaborators. No tuning round.
 
 ### Phase 4: full runs, select the default board
 
@@ -435,6 +444,7 @@ board-review/
 - Final judge panel: the 3 local models (free). The paid published judges are the backup (5.1).
 - Gate 2 metric: board findings labeled CONFIRMED + PLAUSIBLE (Yara's proposal, approved).
 - Gate 2 rule, v2 (2026-11-04): full-board recall above `/code-review`'s, 2 repeats per PR (Phase 3). The full board is for recall, the default board for F1 (section 1).
+- Gate 2 v2 failed on Martian (2026-11-05). No member is tuned; the same rule is tested on 24 Qodo PRs, functional-bug recall deciding (Phase 3).
 - Four method-based members added, the grouping rule tightened, and marginal recall made the primary member metric (2026-11-04).
 - Intent: both variants get the PR title and description (5.1), with "neither" as the fallback.
 - Gate 1's paid judge: Claude Sonnet 4.5 through OpenRouter, with the pass rule in Phase 3.
