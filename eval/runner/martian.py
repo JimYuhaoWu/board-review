@@ -121,6 +121,11 @@ def intent_text(title: str, body: str) -> str:
     return f"{title.strip()}\n\n{body}" if body else title.strip()
 
 
+def describe(title: str, body: str) -> tuple[str, str | None]:
+    """Intent text, and the upstream PR URL if the PR names one (Martian's golden file does)."""
+    return intent_text(title, body), None
+
+
 def golden_records(entries: list[MartianEntry]) -> list[GoldenComment]:
     return [
         GoldenComment(pr_id=entry.pr_id, comment=c.comment, severity=c.severity, category=c.category)
@@ -134,12 +139,17 @@ def build_pull_requests(
     data_dir: Path,
     known: dict[str, PullRequest],
     details: Callable[[str], GitHubPR] = fetch_pr_details,
+    describe: Callable[[str, str], tuple[str, str | None]] = describe,
 ) -> list[PullRequest]:
-    """Look up each PR (unless `known` already records it), fetch its commits, and build its repo."""
+    """Look up each PR (unless `known` already records it), fetch its commits, and build its repo.
+
+    `describe` turns the GitHub title and body into the intent text and, when the body names it,
+    the upstream PR URL (the Qodo adapter uses this).
+    """
     prs = []
     for n, entry in enumerate(entries, 1):
         print(f"[{n}/{len(entries)}] {entry.pr_id}", file=sys.stderr, flush=True)
-        prs.append(_build_one(entry, data_dir, known.get(entry.pr_id), details))
+        prs.append(_build_one(entry, data_dir, known.get(entry.pr_id), details, describe))
     return prs
 
 
@@ -148,6 +158,7 @@ def _build_one(
     data_dir: Path,
     known: PullRequest | None,
     details: Callable[[str], GitHubPR],
+    describe: Callable[[str, str], tuple[str, str | None]] = describe,
 ) -> PullRequest:
     pr = PullRequest(
         id=entry.pr_id,
@@ -162,13 +173,18 @@ def _build_one(
 
     if known and known.head and known.github_base:
         github_base, head, intent = known.github_base, known.head, known.intent
+        original_url = entry.original_url or known.original_url
     else:
         try:
             found = details(entry.url)
         except RuntimeError as e:
             return pr.model_copy(update={"reason": f"GitHub lookup failed: {e}"})
-        github_base, head, intent = found.base_sha, found.head_sha, intent_text(found.title, found.body)
-    pr = pr.model_copy(update={"github_base": github_base, "head": head, "intent": intent})
+        github_base, head = found.base_sha, found.head_sha
+        intent, named = describe(found.title, found.body)
+        original_url = entry.original_url or named
+    pr = pr.model_copy(
+        update={"github_base": github_base, "head": head, "intent": intent, "original_url": original_url}
+    )
 
     cache = data_dir / "cache" / f"{entry.project}.git"
     gitrepo.ensure_bare(cache)

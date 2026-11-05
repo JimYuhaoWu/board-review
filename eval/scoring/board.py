@@ -9,7 +9,7 @@ Martian's evaluate_review, which marks only each golden comment's best candidate
 from collections import defaultdict
 from itertools import combinations
 
-from .martian.score_profiles import PROFILE_CATEGORIES
+from .profiles import PROFILE_CATEGORIES
 from .metrics import bootstrap, per_pr, summarize
 from .views import LABEL_FILTERS, View, score
 
