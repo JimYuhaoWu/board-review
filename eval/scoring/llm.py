@@ -171,7 +171,12 @@ class JudgeModel:
         self._waited = 0.0
 
     async def _call(self, call):
-        """One paced call; on EndpointBusy, pause and repeat it."""
+        """One paced call; on EndpointBusy or a timeout, pause and repeat it.
+
+        Martian's functions retry a timeout a few times and then return {"error": "Timed out ..."}.
+        That is the endpoint being slow, not a bad request, so it is treated like a busy endpoint:
+        one slow call no longer ends a long judging run. `max_wait` still bounds the total pause.
+        """
         while True:
             await self._slot()
             self.calls += 1
@@ -179,6 +184,9 @@ class JudgeModel:
                 result = await call()
             except EndpointBusy as e:
                 self._pause(str(e))
+                continue
+            if isinstance(result, dict) and str(result.get("error", "")).startswith("Timed out"):
+                self._pause(result["error"])
                 continue
             self._ok()
             return result

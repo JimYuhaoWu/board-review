@@ -272,6 +272,50 @@ def test_busy_endpoint_pauses_and_resumes(tmp_path, monkeypatch):
     assert calls == ["busy", "down", "ok"]  # each failure paused and repeated once; Martian's loop never ran
 
 
+def test_timeout_pauses_and_repeats(tmp_path, monkeypatch):
+    jm = _judge_model(tmp_path, monkeypatch)
+    answers = [{"error": "Timed out after 180s"}, {"error": "Timed out after 180s"},
+               {"reasoning": "r", "match": True, "confidence": 0.9}]
+    seen = []
+
+    async def call_llm(prompt):
+        seen.append(prompt)
+        return answers[len(seen) - 1]
+
+    jm.judge.call_llm = call_llm
+    result = asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+    assert result["match"] is True and len(seen) == 3
+
+
+def test_timeouts_past_max_wait_stop(tmp_path, monkeypatch):
+    from eval.scoring.llm import EndpointUnavailable
+
+    jm = _judge_model(tmp_path, monkeypatch, max_wait=0.05)
+
+    async def call_llm(prompt):
+        return {"error": "Timed out after 180s"}
+
+    jm.judge.call_llm = call_llm
+    with pytest.raises(EndpointUnavailable):
+        asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+
+
+def test_other_errors_are_not_repeated(tmp_path, monkeypatch):
+    from eval.scoring.llm import LLMError
+
+    jm = _judge_model(tmp_path, monkeypatch)
+    seen = []
+
+    async def call_llm(prompt):
+        seen.append(prompt)
+        return {"error": "JSON parse failed"}
+
+    jm.judge.call_llm = call_llm
+    with pytest.raises(LLMError):
+        asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+    assert len(seen) == 1
+
+
 def test_endpoint_unavailable_stops(tmp_path, monkeypatch):
     from eval.scoring.llm import EndpointUnavailable
 
