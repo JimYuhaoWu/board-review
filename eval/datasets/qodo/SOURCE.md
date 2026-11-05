@@ -19,12 +19,12 @@ Each item is an open PR in a fork under https://github.com/agentic-review-benchm
 | PR body, `**Original PR URL**` | `original_url` |
 | issue `title`, `description`, `file_path`, lines, `rule_name` | `comment`: "title. description (file:start-end)", plus "Repository rule: ..." for rule violations. 36 issues have no file or lines. |
 | issue without `rule_name` (309) | category `bug`: functional bugs, counted by the Core profile |
-| issue with `rule_name` (271) | category `rule`: breaches of a repository rule that Qodo mined from the codebase (`rules_for_repo.jsonl`, not used here). Counted only by the All profile (`eval/scoring/profiles.py`). |
+| issue with `rule_name` (271) | category `rule`: breaches of a repository rule that Qodo mined from the codebase (`rules_for_repo.jsonl`). Counted only by the All profile (`eval/scoring/profiles.py`). |
 | (no severity) | `Unrated` |
 
 Every PR has 2 to 5 functional bugs (3.1 on average) and 5.8 issues in all.
 
-Neither variant is given the repository rules, so rule violations measure what a reviewer notices without them. That favours a style-minded member, which is why the Core profile leaves them out.
+**The rules are in the repositories.** In every fork, a commit by Qodo ("Add AGENTS.md with compliance rules for PR analysis") replaced `AGENTS.md` with the mined rules, in the base commit. In Ghost, cal.com and dify, `CLAUDE.md` holds the same rules too. Neither file is loaded automatically: the runner's `--setting-sources user` keeps `CLAUDE.md` out, and Claude Code doesn't load `AGENTS.md`. But a reviewer can open them, and `/code-review` looks for `CLAUDE.md`. So rule recall partly measures whether a variant reads these files. That is one more reason the Core profile, which decides the gate, leaves rule violations out. They also favour a style-minded member. Every PR records the files in `agent_files`.
 
 ## Known leaks, out of reach of the reviewers
 
