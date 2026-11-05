@@ -9,7 +9,8 @@ over PRs (micro average). Repeats of one PR are averaged first, so every PR weig
 import random
 from collections import defaultdict
 
-from .martian.score_profiles import PROFILE_CATEGORIES, _fbeta
+from .martian.score_profiles import _fbeta
+from .profiles import PROFILE_CATEGORIES
 
 Counts = tuple[float, float, float]  # tp, fp, fn
 

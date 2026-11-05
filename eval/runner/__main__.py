@@ -1,9 +1,11 @@
 """Data pipeline and runner: the Martian dataset, the split, and benchmark runs (TASKS Y1-Y4).
 
 Usage (from the repo root, after `uv sync`):
-    uv run python -m eval.runner fetch  [--data-dir DIR] [--refresh]   # Y1: prs.jsonl, one repo per PR
-    uv run python -m eval.runner golden                                # Y2: golden.jsonl
-    uv run python -m eval.runner split  [--dev-per-repo N]             # Y3: split.json, written once
+    uv run python -m eval.runner fetch  [--dataset D] [--data-dir DIR] [--refresh]   # Y1: prs.jsonl, one repo per PR
+    uv run python -m eval.runner golden [--dataset D]                                # Y2: golden.jsonl
+    uv run python -m eval.runner split  [--dataset D] [--dev-per-repo N]             # Y3: split.json, written once
+
+--dataset is martian (default) or qodo; it picks the source and eval/datasets/<dataset>/.
     uv run python -m eval.runner run --variant V (--prs IDS | --set S) --repeat N [--dry-run]   # Y4
     uv run python -m eval.runner run --variant board-full --members ID (--prs IDS | --set dev|pilot) \\
         --repeat N                                                                            # Y7: one member
@@ -35,14 +37,14 @@ import datetime as dt
 import os
 from pathlib import Path
 
-from eval.runner import martian
+from eval.runner import martian, qodo
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
 from eval.runner.run import (
     PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name, run_one,
     stale_reason,
 )
-from eval.runner.split import Split, make_split, write_frozen
+from eval.runner.split import SEED, Split, make_split, write_frozen
 
 
 def _default_data_dir() -> Path:
@@ -53,18 +55,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval.runner", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    fetch = sub.add_parser("fetch", help="look up the Martian PRs and build one repository per PR")
+    fetch = sub.add_parser("fetch", help="look up the dataset's PRs and build one repository per PR")
+    _add_dataset(fetch)
     fetch.add_argument("--data-dir", type=Path, default=_default_data_dir())
-    fetch.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
     fetch.add_argument("--refresh", action="store_true", help="look every PR up on GitHub again")
 
-    golden = sub.add_parser("golden", help="convert the Martian golden comments")
-    golden.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    golden = sub.add_parser("golden", help="convert the dataset's golden comments")
+    _add_dataset(golden)
 
     split = sub.add_parser("split", help="freeze the development / test split")
-    split.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
+    _add_dataset(split)
     split.add_argument("--dev-per-repo", type=int, default=3)
     split.add_argument("--pilot-per-repo", type=int, default=2)
+    split.add_argument("--seed", type=int, default=SEED)
 
     run = sub.add_parser("run", help="run variants through claude -p (Y4)")
     _add_selection(run)
@@ -77,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     pack.add_argument("--out", type=Path, help="default: eval/results/packs/<dataset>-<which>-r<N>-<time>.zip")
 
     args = parser.parse_args(argv)
+    if getattr(args, "dataset_dir", None) is None:
+        args.dataset_dir = DATASET_DIR.parent / getattr(args, "dataset", "martian")
     if args.command == "fetch":
         return _fetch(args)
     if args.command == "golden":
@@ -86,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pack":
         return _pack(args)
     return _run(args)
+
+
+def _add_dataset(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--dataset", choices=["martian", "qodo"], default="martian")
+    p.add_argument("--dataset-dir", type=Path, help="default: eval/datasets/<dataset>")
 
 
 def _add_selection(p: argparse.ArgumentParser) -> None:
@@ -114,7 +124,10 @@ def _fetch(args: argparse.Namespace) -> int:
     known = {}
     if prs_path.exists() and not args.refresh:
         known = {pr.id: pr for pr in read_jsonl(prs_path, PullRequest)}
-    prs = martian.build_pull_requests(martian.load_entries(), args.data_dir, known)
+    if args.dataset == "qodo":
+        prs = qodo.build_pull_requests(qodo.load_entries(), args.data_dir, known)
+    else:
+        prs = martian.build_pull_requests(martian.load_entries(), args.data_dir, known)
     write_jsonl(prs_path, prs)
 
     runnable = collections.Counter(pr.repo for pr in prs if pr.runnable)
@@ -131,7 +144,10 @@ def _fetch(args: argparse.Namespace) -> int:
 
 
 def _golden(args: argparse.Namespace) -> int:
-    records = martian.golden_records(martian.load_entries())
+    if args.dataset == "qodo":
+        records = qodo.golden_records(qodo.load_entries())
+    else:
+        records = martian.golden_records(martian.load_entries())
     prs_path = args.dataset_dir / "prs.jsonl"
     if prs_path.exists():
         ids = {pr.id for pr in read_jsonl(prs_path, PullRequest)}
@@ -147,7 +163,7 @@ def _golden(args: argparse.Namespace) -> int:
 
 def _split(args: argparse.Namespace) -> int:
     prs = read_jsonl(args.dataset_dir / "prs.jsonl", PullRequest)
-    result = make_split(prs, dev_per_repo=args.dev_per_repo, pilot_per_repo=args.pilot_per_repo)
+    result = make_split(prs, seed=args.seed, dev_per_repo=args.dev_per_repo, pilot_per_repo=args.pilot_per_repo)
     path = args.dataset_dir / "split.json"
     write_frozen(path, result)
     print(f"seed {result.seed}: {len(result.dev)} development, {len(result.test)} test -> {path}")
