@@ -167,6 +167,19 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
   - **Command:** `uv run python -m eval.scoring gate2 --dataset martian --judge deepseek-flash --split dev`. It prints PASS, FAIL, or NOT DECIDED (too few repeats).
   - **If it fails:** stop. The next step is a written analysis and a decision by both collaborators, not another tuning round on the pilot.
   - **If it passes:** Phase 4.
+  - **Result (2026-11-05): FAIL.** Y8 runs, 10 pilot PRs, 2 repeats each, judged by `deepseek-flash`:
+
+    | Core profile | Precision | Recall | F1 |
+    |---|---|---|---|
+    | Full board (`board:full:cp`) | 32.0% | 67.4% | 43.4% |
+    | `/code-review` | 29.6% | 70.9% | 41.8% |
+    | Full board, every finding counted | 24.7% | 72.1% | 36.8% |
+
+    - ΔRecall −3.5 points (95% CI −16.2 to +10.5), ΔF1 +1.7 (−6.9 to +10.5). Grouping lost 2 golden comments, down from 5.
+    - The gap is in the `bug` category (14.5 of 22 against 17 of 22). The board found more test gaps, style, and doc defects.
+    - The pilot has 43 Core golden comments, so a 3.5-point gap is about 1.5 comments, and the CI can't separate the two variants.
+    - Following the rule above, the briefs are not tuned. The members that could be tuned later are listed under "When members are tuned".
+    - **Next step, under discussion:** an external check on Qodo PR-Review-Bench (section 6.3), with its own rule written down before any run.
 
 ### Phase 4: full runs, select the default board
 
@@ -207,6 +220,16 @@ Tuning a brief on the development PRs is allowed, but each change is an experime
 3. **Measure** with at least 2 repeats per PR, and compare with the previous version by paired bootstrap on the member's marginal recall and its own-category recall.
 4. **Keep, revise once, or retire.** A member that still has zero unique golden comments after one revision leaves the pool.
 5. The test PRs are never used for tuning (section 6.6).
+
+**Members that could be tuned later (deferred, 2026-11-05).** The Gate 2 v2 member cards (20 runs each) show these candidates. None is tuned or re-run now: the aim is to settle Gate 2, and a re-run for a marginal gain isn't worth its cost yet. Any later round follows the five steps above.
+
+| Member | What the cards show | Possible direction |
+|---|---|---|
+| intern, concurrency, contract, regression, boundary | 0 unique golden comments, marginal recall 0.0% | Revise once or retire (step 4). Concurrency found 3 of 4 concurrency issues, but others found them too. |
+| edge | 1 unique; F1 contribution −3.6% (CI −5.0 to −1.7), the most negative | Fewer, sharper findings |
+| intent | 1 unique; marginal recall −1.2% | Check whether the negative value is a grouping effect (section 6.5) |
+| boundary | Missed the two issues its brief names (stale metadata after a write, a type the serializer can't take), 0 of 2 each | Method, not wording: trace each crossing to its reader |
+| test-auditor | All of its +3.5% marginal recall comes from one development issue (two golden comments on the same mocked sleep), which its attack list nearly paraphrases | Its value is unproven until a dataset its brief wasn't written from |
 
 ### Phase 4b (optional): stronger models for selected roles
 
@@ -431,7 +454,7 @@ None at the moment.
 - **Web applications only:** results on Martian don't transfer automatically to other fields. That is why domain datasets exist.
 - **Variable intent text:** the intent auditor depends on PR descriptions, and their quality varies.
 - **Few repeats:** 2 repeats make each comparison noisier, so only larger differences will be clear.
-- **Members designed after seeing development misses.** The four members added on 2026-11-04 were motivated by what the pilot missed. Their briefs state general methods, but the pilot will flatter them. Only the test split can show whether they generalize.
+- **Members designed after seeing development misses.** The four members added on 2026-11-04 were motivated by what the pilot missed. Their briefs state general methods, but the pilot will flatter them. Only the test split or an external dataset can show whether they generalize. Gate 2 v2 confirmed the risk: the Test auditor's whole marginal recall came from the issue its brief was written from.
 - **Offline variant b keeps c's labels (Yara, review of PR #8).** Grouping and adjudication run over all members' findings. In a real b run, groups would be smaller, a group's severity could drop below the bar for a second verifier, and verifiers would see fewer co-findings. So offline b is exact for the raw union but only approximate for CONFIRMED and PLAUSIBLE. Phase 4 checks the size of this effect with real b runs on the development PRs.
 - **`/code-review` reports at most 32 findings,** even with `--max-findings all`: that is its `ReportFindings` tool's limit. Martian PRs have far fewer golden comments, so the cap should rarely matter.
 
