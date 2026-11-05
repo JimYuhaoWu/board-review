@@ -8,9 +8,10 @@ path, since both datasets are GitHub pull requests.
 
 Golden issues come in two kinds, told apart by `rule_name`:
 - **functional** bugs (no `rule_name`): category `bug`, counted by the Core profile;
-- **rule** violations: breaches of a repository rule that Qodo mined from the codebase
-  (`rules_for_repo.jsonl`), such as "use yarn, not npm". Neither variant is given those rules,
-  so they are category `rule`, counted only by the All profile.
+- **rule** violations: breaches of a repository rule that Qodo mined from the codebase, such as
+  "use yarn, not npm": category `rule`, counted only by the All profile. Qodo wrote the rules
+  into each fork's AGENTS.md (and CLAUDE.md where one exists), so a reviewer that reads those
+  files sees them (eval/datasets/qodo/SOURCE.md).
 
 Qodo gives no severity, so every issue is `Unrated`.
 """
