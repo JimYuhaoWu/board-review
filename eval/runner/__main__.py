@@ -9,6 +9,7 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner run --variant V (--prs IDS | --set S) --repeat N [--dry-run]   # Y4
     uv run python -m eval.runner run --variant board-full --members ID (--prs IDS | --set dev|pilot) \\
         --repeat N                                                                            # Y7: one member
+    uv run python -m eval.runner run --variant board-cr (--prs IDS | --set S) --repeat N         # Gate 3, A2
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
     uv run python -m eval.runner pack --variant V [--members ID] (--prs IDS | --set S) --repeat N   # zip for judging
@@ -21,6 +22,9 @@ a full run of the same PR and repeat.
 
 A single-member run (PLAN 6.7) runs one member and its verifiers on development PRs only, into
 the variant folder `board-<id>`, with the same repeat numbers as the full runs it is scored with.
+
+A `board-cr` run (PLAN Phase 3, Gate 3) runs `/code-review`, then the full board with its findings
+as the extra member `code-review`. `--variant both` stays `code-review` and `board-full`.
 
 Repositories go to --data-dir, outside this repository, so a reviewer working in them can't read
 the golden comments. The default is $BOARD_EVAL_DATA, or ~/board-review-data.
@@ -41,8 +45,8 @@ from eval.runner import martian, qodo
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
 from eval.runner.run import (
-    PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name, run_one,
-    stale_reason,
+    BOARD_CR, PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
+    run_one, stale_reason,
 )
 from eval.runner.split import SEED, Split, make_split, write_frozen
 
@@ -100,7 +104,7 @@ def _add_dataset(p: argparse.ArgumentParser) -> None:
 
 def _add_selection(p: argparse.ArgumentParser) -> None:
     """Which runs: the variant, the PRs, and the repeat. Shared by `run` and `pack`."""
-    p.add_argument("--variant", choices=[*VARIANTS, "both"], required=True)
+    p.add_argument("--variant", choices=[*VARIANTS, BOARD_CR, "both"], required=True)
     p.add_argument("--repeat", type=int, required=True)
     which = p.add_mutually_exclusive_group(required=True)
     which.add_argument("--prs", help="comma-separated PR ids")
@@ -173,6 +177,8 @@ def _split(args: argparse.Namespace) -> int:
 
 def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     variants = VARIANTS if args.variant == "both" else (args.variant,)
+    if args.variant == BOARD_CR and args.members != "full":
+        raise SystemExit("board-cr runs the full board; --members must be full")
     single_member = args.members != "full" and not args.smoke_repo
     if single_member:
         if "," in args.members:
@@ -243,7 +249,12 @@ def _run(args: argparse.Namespace) -> int:
             state = _refusal(paths, spec) or ("done" if is_done(paths, spec) else "to run")
             print(f"{run_name(spec)} ({state}) in {spec.repo}")
             intent_file = Path("<intent-file>") if spec.intent and spec.variant.startswith("board-") else None
-            print("  " + " ".join(command_for(spec, paths.claude, intent_file)[1:]))
+            extra_file = None
+            if spec.variant == BOARD_CR:
+                review = spec.model_copy(update={"variant": "code-review"})
+                print("  " + " ".join(command_for(review, paths.claude)[1:]))
+                extra_file = Path("<extra-findings-file>")
+            print("  " + " ".join(command_for(spec, paths.claude, intent_file, extra_file=extra_file)[1:]))
         return 0
     refused = [f"  {run_name(s)}: {reason}" for s in specs if (reason := _refusal(paths, s))]
     if refused:

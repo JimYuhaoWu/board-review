@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 from eval.runner import __main__ as cli
 from eval.runner import run as runner
 from eval.runner.stream import ExpectedSetup, InitInfo, ResultInfo, parse_board_json, setup_problems
+from eval.scoring.data import code_review_member_output
 
 EXPECTED = ExpectedSetup(version="2.1.317", model="claude-sonnet-5-5", tools=runner.TOOLS)
 
@@ -379,3 +381,120 @@ def test_unchanged_member_alone_would_overwrite_the_full_run(tmp_path: Path, mon
     current = runner.skill_hashes()
     monkeypatch.setattr(runner, "skill_hashes", lambda: {**current, "member:edge": "edited"})
     assert runner.cache_clash(paths, alone) is None
+
+
+def _run_sessions(monkeypatch: pytest.MonkeyPatch, *sessions: list[dict]) -> list[_FakeProcess]:
+    """Like _run_with, but the n-th `claude` call prints the n-th session. Each process keeps its
+    command and the files its --add-dir folders held when it started."""
+    started: list[_FakeProcess] = []
+    real_popen = subprocess.Popen
+    queue = list(sessions)
+
+    def fake_popen(command, *args, **kwargs):
+        if command[0] != "claude":
+            return real_popen(command, *args, **kwargs)
+        process = _FakeProcess(queue.pop(0))
+        process.command = command
+        folders = [Path(command[i + 1]) for i, arg in enumerate(command) if arg == "--add-dir"]
+        process.inputs = {p.name: p.read_text(encoding="utf-8") for folder in folders for p in folder.iterdir()}
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(runner.subprocess, "Popen", fake_popen)
+    return started
+
+
+REVIEW_TEXT = "1. `a.py:1`: x is now 2, but callers expect 1\n   Failure scenario: a caller reads x and gets 2.\n"
+USAGE_LIMIT = {"type": "result", "is_error": True, "subtype": "error", "result": "You've hit your usage limit · resets 5pm"}
+
+
+def _review_result(text: str = REVIEW_TEXT, **fields) -> dict:
+    return {"type": "result", "is_error": False, "subtype": "success", "result": text, **fields}
+
+
+def test_board_cr_runs_code_review_then_the_board_with_its_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo
+):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    board = {**BOARD, "members": {**BOARD["members"], "ran": ["edge", "intern", "code-review"]}}
+    started = _run_sessions(
+        monkeypatch,
+        [_init_event(), _review_result(total_cost_usd=0.1, permission_denials=[{"tool_name": "Bash"}])],
+        [_init_event(), {**_board_result(board), "total_cost_usd": 1.5}],
+    )
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-cr", path, base, head).model_copy(update={"intent": "Set x to 2"})
+    meta = runner.run_one(spec, paths, "B")
+
+    assert meta.status == "ok", meta.detail
+    review = runner.run_dir(paths, spec) / "code-review"
+    assert {p.name for p in review.iterdir()} == {"stream.jsonl", "stderr.txt", "final.md", "meta.json"}
+    assert json.loads((review / "meta.json").read_text(encoding="utf-8"))["variant"] == "code-review"
+    assert started[0].command[2].startswith(f"/code-review medium --max-findings all {base}..{head}")
+
+    inputs = paths.work / "smoke" / "board-cr" / "smoke" / "r1-intent"
+    board_command = started[1].command
+    assert (f"--intent-file {(inputs / 'intent.txt').as_posix()} "
+            f"--extra-findings {(inputs / 'extra-findings.json').as_posix()} {base}..{head}") in board_command[2]
+    assert board_command.count("--add-dir") == 1 and board_command[board_command.index("--add-dir") + 1] == str(inputs)
+    extra = started[1].inputs["extra-findings.json"]
+    assert json.loads(extra) == code_review_member_output(review)
+    assert json.loads(extra)["findings"][0]["file"] == "a.py"
+    assert not inputs.exists(), "input folder removed after the run"
+
+    assert meta.extra_findings == {"sha256": hashlib.sha256(extra.encode("utf-8")).hexdigest()[:12], "findings": 1}
+    assert meta.sessions["code-review"]["total_cost_usd"] == 0.1 and meta.sessions["board"]["total_cost_usd"] == 1.5
+    assert meta.total_cost_usd == pytest.approx(1.6) and meta.permission_denials == 1
+    assert meta.members["ran"][-1] == "code-review"
+    assert runner.is_done(paths, spec)
+    assert not paths.cache.exists(), "board-cr writes no cache files"
+
+
+def test_board_cr_without_review_findings_never_starts_the_board(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo
+):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    started = _run_sessions(monkeypatch, [_init_event(), _review_result("No issues found.", total_cost_usd=0.05)])
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-cr", path, base, head)
+    meta = runner.run_one(spec, paths, "B")
+
+    assert meta.status == "failed:extra-findings"
+    assert len(started) == 1, "the board never started"
+    assert (runner.run_dir(paths, spec) / "code-review" / "final.md").exists()
+    assert meta.total_cost_usd == 0.05 and list(meta.sessions) == ["code-review"]
+    assert not runner.is_done(paths, spec)
+
+
+@pytest.mark.parametrize("limited", ["code-review", "board"])
+def test_board_cr_usage_stop_in_either_session_redoes_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo, limited: str
+):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    sessions = [[_init_event(), USAGE_LIMIT]]
+    if limited == "board":
+        sessions = [[_init_event(), _review_result()], [_init_event(), USAGE_LIMIT]]
+    started = _run_sessions(monkeypatch, *sessions)
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-cr", path, base, head)
+    assert runner.run_one(spec, paths, "B").status == "failed:usage-limit"
+    assert len(started) == len(sessions) and not runner.is_done(paths, spec)
+
+    started = _run_sessions(monkeypatch, [_init_event(), _review_result()], [_init_event(), _board_result(BOARD)])
+    assert runner.run_one(spec, paths, "B").status == "ok"
+    assert len(started) == 2, "the retry redid both sessions"
+
+
+def test_board_cr_runs_the_full_board(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    common = ["run", "--variant", "board-cr", "--prs", DEV_PR, "--repeat", "1", "--dry-run",
+              "--results-dir", str(tmp_path)]
+    with pytest.raises(SystemExit, match="--members must be full"):
+        cli.main([*common, "--members", "edge"])
+    cli.main(common)
+    out = capsys.readouterr().out
+    assert f"martian/board-cr/{DEV_PR}/r1 (to run)" in out
+    assert "/code-review medium --max-findings all" in out
+    assert "--intent-file <intent-file> --extra-findings <extra-findings-file>" in out

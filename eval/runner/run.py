@@ -7,6 +7,11 @@ the same command again skips finished runs and retries the rest. A board run is 
 call, so a retry re-runs the whole board, not single members. A finished board run made with an
 older plugin isn't done: `stale_reason` names what changed, and its folder must be moved aside
 before it runs again.
+
+A `board-cr` run (PLAN Phase 3, Gate 3, A2) is two sessions: a `/code-review` session stored in
+the run's `code-review/` folder, then the full board with that session's findings as the extra
+member `code-review` (`--extra-findings`). A failure in either session leaves the run unfinished,
+so a retry redoes both.
 """
 
 from __future__ import annotations
@@ -27,11 +32,13 @@ from pydantic import BaseModel
 from eval.runner import gitrepo
 from eval.runner.records import ROOT
 from eval.runner.stream import ExpectedSetup, InitInfo, ResultInfo, parse_board_json, setup_problems
+from eval.scoring.data import code_review_member_output
 
 PINNED_VERSION = "2.1.317"
 MODEL = "claude-sonnet-5-5"
 EFFORT = "medium"
 VARIANTS = ("code-review", "board-full")
+BOARD_CR = "board-cr"
 # ReportFindings is how /code-review hands back structured findings, which scoring reads (TASKS).
 TOOLS = ["Read", "Grep", "Glob", "Bash", "Task", "ReportFindings"]
 _READ_ONLY_COMMANDS = [
@@ -108,6 +115,10 @@ class RunMeta(BaseModel):
     permission_denials: int = 0
     members: dict[str, Any] | None = None
     setup: InitInfo | None = None
+    # board-cr only: each session's cost, time, and denials (the top-level ones are their sums),
+    # and the hash and size of the extra-findings file the board read.
+    sessions: dict[str, dict[str, Any]] = {}
+    extra_findings: dict[str, Any] | None = None
 
 
 def run_name(spec: RunSpec) -> str:
@@ -148,8 +159,9 @@ def cache_clash(paths: Paths, spec: RunSpec) -> str | None:
     The cache path doesn't name the variant. A member run alone while its brief is unchanged
     since a full run of the same PR and repeat would replace that run's file, and would measure
     nothing new. A full run may replace a single-member file: scoring starts from the full run.
+    board-cr runs write no cache files.
     """
-    if spec.variant == "board-full":
+    if spec.variant in ("board-full", BOARD_CR):
         return None
     hashes = skill_hashes()
     config = config_hash(spec, PINNED_VERSION, hashes)
@@ -170,7 +182,7 @@ def cache_file(cache: Path, spec: RunSpec, member: str, config: str, member_hash
     )
 
 
-def prompt_for(spec: RunSpec, intent_file: Path | None) -> str:
+def prompt_for(spec: RunSpec, intent_file: Path | None, extra_file: Path | None = None) -> str:
     """The variant's command. Both variants get the PR's title and description (PLAN 5.1)."""
     target = f"{spec.base}..{spec.head}"
     if spec.variant == "code-review":
@@ -179,17 +191,20 @@ def prompt_for(spec: RunSpec, intent_file: Path | None) -> str:
     if spec.variant.startswith("board-"):
         # A file, because PR descriptions can contain `--flags` that --intent would misparse.
         intent = f"--intent-file {intent_file.as_posix()} " if intent_file else ""
-        return f"/board-review:review --members {spec.members} --max-findings 8 --format json {intent}{target}"
+        extra = f"--extra-findings {extra_file.as_posix()} " if extra_file else ""
+        return f"/board-review:review --members {spec.members} --max-findings 8 --format json {intent}{extra}{target}"
     raise ValueError(f"unknown variant {spec.variant}")
 
 
 def command_for(
-    spec: RunSpec, claude: str, intent_file: Path | None = None, plugin_dir: Path = PLUGIN_DIR
+    spec: RunSpec, claude: str, intent_file: Path | None = None, plugin_dir: Path = PLUGIN_DIR,
+    extra_file: Path | None = None,
 ) -> list[str]:
-    # The intent file lives outside the worktree, so the reviewers need read access to its folder.
-    add_dir = ["--add-dir", str(intent_file.parent)] if intent_file else []
+    # The input files live outside the worktree, so the reviewers need read access to their folders.
+    folders = dict.fromkeys(str(f.parent) for f in (intent_file, extra_file) if f)
+    add_dir = [arg for folder in folders for arg in ("--add-dir", folder)]
     return [
-        claude, "-p", prompt_for(spec, intent_file),
+        claude, "-p", prompt_for(spec, intent_file, extra_file),
         *add_dir,
         "--model", spec.model,
         "--effort", spec.effort,
@@ -310,14 +325,77 @@ def run_one(spec: RunSpec, paths: Paths, account: str) -> RunMeta:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    hashes = skill_hashes()
     run_work = paths.work / spec.dataset / spec.variant / spec.pr_id
-    intent_file = None
-    if spec.intent and spec.variant.startswith("board-"):
-        intent_file = run_work / f"r{spec.repeat}-intent" / "intent.txt"
-        intent_file.parent.mkdir(parents=True, exist_ok=True)
+    if spec.variant == BOARD_CR:
+        meta = _run_board_cr(spec, paths, account, out, run_work)
+    else:
+        meta = _session(spec, paths, account, out, run_work)
+        if meta.status == "ok" and spec.variant.startswith("board-"):
+            _write_cache(paths.cache, spec, meta, json.loads((out / "final.json").read_text(encoding="utf-8")))
+    (out / "meta.json").write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return meta
+
+
+def _run_board_cr(spec: RunSpec, paths: Paths, account: str, out: Path, run_work: Path) -> RunMeta:
+    """`/code-review` in its own session, then the full board with its findings as an extra member.
+
+    No cache files: the cache path doesn't name the variant, so they would replace a board-full
+    run's files, and these members' labels were made with a 13th member present.
+    """
+    review_out = out / "code-review"
+    review_out.mkdir()
+    review_spec = spec.model_copy(update={"variant": "code-review"})
+    review = _session(review_spec, paths, account, review_out, run_work / "code-review")
+    (review_out / "meta.json").write_text(review.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    extra = code_review_member_output(review_out) if review.status == "ok" else None
+    if extra is None:
+        if review.status == "failed:usage-limit":
+            status, detail = review.status, review.detail
+        elif review.status != "ok":
+            status, detail = "failed:code-review", f"{review.status}: {review.detail or ''}"
+        else:
+            status, detail = "failed:extra-findings", "the /code-review session has no parsable findings"
+        meta = review.model_copy(update={"variant": spec.variant, "roster": spec.members, "status": status,
+                                         "detail": detail})
+        return _add_sessions(meta, {"code-review": review})
+
+    text = json.dumps(extra, ensure_ascii=False, indent=1) + "\n"
+    board = _session(spec, paths, account, out, run_work, extra_findings=text)
+    board.started_at = review.started_at
+    board.extra_findings = {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
+                            "findings": len(extra["findings"])}
+    return _add_sessions(board, {"code-review": review, "board": board})
+
+
+def _add_sessions(meta: RunMeta, sessions: dict[str, RunMeta]) -> RunMeta:
+    """Record each session, and make the run's cost, time, and denials their sums."""
+    meta.sessions = {
+        name: {"status": s.status, "total_cost_usd": s.total_cost_usd, "wall_seconds": s.wall_seconds,
+               "permission_denials": s.permission_denials}
+        for name, s in sessions.items()
+    }
+    costs = [s.total_cost_usd for s in sessions.values() if s.total_cost_usd is not None]
+    meta.total_cost_usd = round(sum(costs), 6) if costs else None
+    meta.wall_seconds = round(sum(s.wall_seconds or 0 for s in sessions.values()), 1)
+    meta.permission_denials = sum(s.permission_denials for s in sessions.values())
+    return meta
+
+
+def _session(
+    spec: RunSpec, paths: Paths, account: str, out: Path, run_work: Path, extra_findings: str | None = None
+) -> RunMeta:
+    """One `claude -p` session: its files go to `out`, its worktree and input files under `run_work`."""
+    hashes = skill_hashes()
+    inputs = run_work / f"r{spec.repeat}-intent"
+    intent_file = inputs / "intent.txt" if spec.intent and spec.variant.startswith("board-") else None
+    extra_file = inputs / "extra-findings.json" if extra_findings is not None else None
+    if intent_file or extra_file:
+        inputs.mkdir(parents=True, exist_ok=True)
+    if intent_file:
         intent_file.write_text(spec.intent, encoding="utf-8", newline="\n")
-    command = command_for(spec, paths.claude, intent_file, plugin_snapshot(paths.work))
+    if extra_file:
+        extra_file.write_text(extra_findings, encoding="utf-8", newline="\n")
+    command = command_for(spec, paths.claude, intent_file, plugin_snapshot(paths.work), extra_file)
     meta = RunMeta(
         dataset=spec.dataset,
         dataset_commit=_dataset_commit(),
@@ -343,15 +421,12 @@ def run_one(spec: RunSpec, paths: Paths, account: str) -> RunMeta:
         init, result = _stream(command, worktree, paths.config_dir, out, spec)
     finally:
         _remove_worktree(spec.repo, worktree)
-        if intent_file:
-            shutil.rmtree(intent_file.parent, ignore_errors=True)
+        if intent_file or extra_file:
+            shutil.rmtree(inputs, ignore_errors=True)
     meta.wall_seconds = round(time.monotonic() - started, 1)
     meta.setup = init
     meta.claude_code_version = init.version if init else None
     _finish(meta, init, result, out, spec)
-    if meta.status == "ok" and spec.variant.startswith("board-"):
-        _write_cache(paths.cache, spec, meta, json.loads((out / "final.json").read_text(encoding="utf-8")))
-    (out / "meta.json").write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return meta
 
 
