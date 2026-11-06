@@ -5,6 +5,8 @@
     uv run python -m eval.scoring members --dataset martian --judge deepseek-flash --split dev
     uv run python -m eval.scoring subsets --dataset martian --judge deepseek-flash --split dev
     uv run python -m eval.scoring gate2   --dataset martian --judge deepseek-flash --split dev
+    uv run python -m eval.scoring gate3   --dataset qodo --judge deepseek-flash --split test --release "Gate 3"
+    uv run python -m eval.scoring merge   --dataset qodo --judge deepseek-flash --split dev --pairs 1,2
 
 See eval/scoring/README.md.
 """
@@ -25,7 +27,7 @@ from .gates import GATE1B_TOOLS
 from .data import ROOT, iter_runs, load_dataset, member_categories, subagent_usage
 from .llm import EndpointUnavailable, JudgeModel, LLMError
 from .metrics import bootstrap, category_recall, per_pr, summarize
-from .pipeline import RESULTS, judge_run, judge_slug, load_records
+from .pipeline import MERGED, RESULTS, judge_run, judge_slug, load_records, merge_records
 from .views import panel, parse_view, score
 
 TEST_LOG = ROOT / "eval" / "reports" / "test-split-log.md"
@@ -84,6 +86,38 @@ async def cmd_judge(args) -> None:
             print("  " + line)
         if failed:
             print("Re-run the same command to retry; finished calls are cached.")
+
+
+async def cmd_merge(args) -> None:
+    """Merge judged `/code-review` repeats into `code-review-x2` records (PLAN Gate 3, A1).
+
+    `--pairs 1,2 3,4` makes merged repeat 1 from repeats 1 and 2, and merged repeat 2 from 3 and 4.
+    The only new judge call per merged record is Martian's dedup over the merged candidates.
+    """
+    ids = pr_ids(args)
+    pairs = [[int(x) for x in p.split(",")] for p in args.pairs]
+    jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60, log=tqdm.write)
+    try:
+        await jm.identify()
+    except (LLMError, EndpointUnavailable) as e:
+        print(f"{args.judge}: can't use the endpoint: {e}")
+        return
+    made, missing, shared = 0, [], 0
+    for pid in ids:
+        by_repeat = {r["repeat"]: r for r in load_records(args.dataset, args.judge, "code-review", [pid])}
+        for k, pair in enumerate(pairs, start=1):
+            if not all(n in by_repeat for n in pair):
+                missing.append(f"{pid} {pair}")
+                continue
+            out = await merge_records([by_repeat[n] for n in pair], jm, k)
+            rec = json.loads(out.read_text(encoding="utf-8"))
+            run_of = [c["finding"].split("/")[0] for c in rec["candidates"]]
+            shared += sum(1 for g in rec["groups"] or [] if len({run_of[i] for i in g}) > 1)
+            made += 1
+    print(f"{made} {MERGED} records; {shared} issues found by more than one run, each counted once; "
+          f"{jm.calls} new judge calls")
+    if missing:
+        print("Missing repeats: " + "; ".join(missing))
 
 
 def _results(args, view, ids) -> dict:
@@ -329,6 +363,50 @@ def cmd_gate2(args) -> None:
     print(f"\n**Gate 2: {'PASS' if passed else 'FAIL'}** (board recall {'>' if passed else '≤'} `/code-review` recall)")
 
 
+GATE3_VIEWS = {"A2": "board:full:cp:issues", "A1": "code-review-x2", "single": "code-review:issues"}
+
+
+def cmd_gate3(args) -> None:
+    """PLAN Phase 3, Gate 3 (Plan A): board + `/code-review` (A2) against `/code-review` run twice
+    and merged (A1), both counted per issue. Recall decides; A2's F1 must be at least one
+    `/code-review` run's."""
+    ids = pr_ids(args)
+    res = {k: _results(args, parse_view(v), ids) for k, v in GATE3_VIEWS.items()}
+    both = sorted({pid for pid, _ in res["A2"]} & {pid for pid, _ in res["A1"]})
+    units = {k: {p: u for p, u in per_pr(r, args.profile).items() if p in both} for k, r in res.items()}
+    print(f"\n## Gate 3: {args.dataset}, split {args.split}, judge {args.judge}, profile {args.profile}\n")
+    print("| Variant | View | PRs | Runs | Precision | Recall | F1 |")
+    print("|---|---|---|---|---|---|---|")
+    for k, v in GATE3_VIEWS.items():
+        s = summarize(units[k])
+        runs = sum(1 for pid, _ in res[k] if pid in both)
+        print(f"| {k} | {v} | {s['prs']} | {runs} | {s['precision']:.1%} | {s['recall']:.1%} | {s['f1']:.1%} |")
+    rows = [("ΔRecall (decides)", bootstrap(units["A2"], units["A1"], "recall", n=args.bootstrap)),
+            ("ΔPrecision", bootstrap(units["A2"], units["A1"], "precision", n=args.bootstrap)),
+            ("ΔF1", bootstrap(units["A2"], units["A1"], "f1", n=args.bootstrap))]
+    print("\n| Paired bootstrap, A2 − A1 | Point | 95% CI | p |")
+    print("|---|---|---|---|")
+    for label, b in rows:
+        pv = "n/a" if b.get("p_two_sided") is None else format(b["p_two_sided"], ".3f")
+        print(f"| {label} | {b['point']:+.1%} | {b['ci95'][0]:+.1%} to {b['ci95'][1]:+.1%} | {pv} |")
+    f1 = {k: summarize(units[k])["f1"] for k in units}
+    guard = f1["A2"] >= f1["single"]
+    print(f"\nGuardrail: A2 F1 {f1['A2']:.1%} {'≥' if guard else '<'} one `/code-review` run's {f1['single']:.1%}.")
+    short = [f"{k} {pid}" for k in ("A2", "A1") for pid in both
+             if sum(1 for p, _ in res[k] if p == pid) < GATE2_REPEATS]
+    if not both or short:
+        print("\nNOT DECIDED: the rule needs 2 repeats per PR for A1 and A2; short: " + (", ".join(short) or "no PRs"))
+        return
+    lo, hi = rows[0][1]["ci95"]
+    if lo > 0 and guard:
+        verdict = "WIN (board + `/code-review` finds more than `/code-review` twice)"
+    elif hi < 0:
+        verdict = "MEMBERS NOT NEEDED (`/code-review` twice finds more)"
+    else:
+        verdict = "NO DECISION (" + ("the recall CI spans 0" if lo <= 0 else "the F1 guardrail fails") + ")"
+    print(f"\n**Gate 3: {verdict}**")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -362,6 +440,22 @@ def main() -> None:
     g2.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
     g2.add_argument("--profile", choices=["strict", "core", "all"], default="core")
     g2.add_argument("--bootstrap", type=int, default=2000, help="bootstrap resamples")
+    mg = sub.add_parser("merge", help="merge /code-review repeats into code-review-x2 records (PLAN Gate 3)")
+    mg.add_argument("--dataset", required=True)
+    mg.add_argument("--judge", required=True)
+    mg.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    mg.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+    mg.add_argument("--pairs", nargs="+", default=["1,2"], help="repeats to merge, one group per merged repeat")
+    mg.add_argument("--concurrency", type=int, default=1, help="calls in flight at once")
+    mg.add_argument("--rate", type=float, default=10.0, help="most calls started per minute")
+    mg.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy or unreachable endpoint")
+    g3 = sub.add_parser("gate3", help="board + /code-review vs /code-review twice (PLAN Phase 3, Gate 3)")
+    g3.add_argument("--dataset", required=True)
+    g3.add_argument("--judge", required=True)
+    g3.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    g3.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+    g3.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    g3.add_argument("--bootstrap", type=int, default=2000, help="bootstrap resamples")
     g = sub.add_parser("gate1b", help="local-judge agreement with the published judges (PLAN Phase 3)")
     g.add_argument("--judge", required=True)
     g.add_argument("--martian-dir", help="the pinned Martian clone's offline/ folder (or set MARTIAN_DIR)")
@@ -388,12 +482,15 @@ def main() -> None:
 
     if args.cmd == "judge":
         asyncio.run(cmd_judge(args))
+    elif args.cmd == "merge":
+        asyncio.run(cmd_merge(args))
     elif args.cmd == "gate1b":
         cmd_gate1b(args)
     elif args.cmd == "gate1":
         cmd_gate1(args)
     else:
-        {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2}[args.cmd](args)
+        {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
+         "gate3": cmd_gate3}[args.cmd](args)
 
 
 if __name__ == "__main__":
