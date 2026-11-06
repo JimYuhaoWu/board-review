@@ -227,7 +227,7 @@ def test_member_cards(tmp_path):
 
 
 def _fake_endpoint(jm, outcomes):
-    """Point jm's judge client at a fake whose calls follow `outcomes`: 'busy', 'down', or 'ok'."""
+    """Point jm's judge client at a fake whose calls follow `outcomes`: 'busy', 'down', '500', or 'ok'."""
     import httpx2 as httpx
     import openai
 
@@ -242,6 +242,8 @@ def _fake_endpoint(jm, outcomes):
                 raise openai.RateLimitError("429 queue", response=httpx.Response(429, request=request), body=None)
             if outcome == "down":
                 raise openai.APIConnectionError(request=request)
+            if outcome == "500":
+                raise openai.InternalServerError("upstream error", response=httpx.Response(500, request=request), body=None)
             msg = type("M", (), {"content": '{"reasoning": "r", "match": true, "confidence": 0.9}'})()
             return type("R", (), {"choices": [type("C", (), {"message": msg})()]})()
 
@@ -270,6 +272,25 @@ def test_busy_endpoint_pauses_and_resumes(tmp_path, monkeypatch):
     result = asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
     assert result["match"] is True
     assert calls == ["busy", "down", "ok"]  # each failure paused and repeated once; Martian's loop never ran
+
+
+def test_server_error_pauses_and_repeats(tmp_path, monkeypatch):
+    # An HTTP 500 from the endpoint's upstream came back for every call for a while (Gate 1b, Qwen):
+    # it is the endpoint failing, not the request, so it pauses like a 429 instead of ending the run.
+    jm = _judge_model(tmp_path, monkeypatch)
+    calls = _fake_endpoint(jm, ["500", "500", "ok"])
+    result = asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
+    assert result["match"] is True
+    assert calls == ["500", "500", "ok"]
+
+
+def test_server_errors_past_max_wait_stop(tmp_path, monkeypatch):
+    from eval.scoring.llm import EndpointUnavailable
+
+    jm = _judge_model(tmp_path, monkeypatch, max_wait=0.05)
+    _fake_endpoint(jm, ["500"])
+    with pytest.raises(EndpointUnavailable):
+        asyncio.new_event_loop().run_until_complete(jm.match("golden", "candidate"))
 
 
 def test_timeout_pauses_and_repeats(tmp_path, monkeypatch):
