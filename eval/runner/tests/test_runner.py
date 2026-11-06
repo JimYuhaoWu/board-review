@@ -57,8 +57,11 @@ def test_setup_problems_are_reported(overrides: dict, fragment: str):
     [
         ({"is_error": True, "api_error_status": 429, "result": "API Error"}, True),
         ({"is_error": True, "result": "You've hit your usage limit · resets 5pm"}, True),
+        ({"is_error": True, "result": "You've hit your 5-hour limit · resets 5:50pm (Asia/Shanghai)"}, True),
+        ({"is_error": False, "result": "You've hit your 5-hour limit · resets 5:50pm (Asia/Shanghai)"}, True),
         ({"is_error": True, "result": "API Error: 500 overloaded"}, False),
         ({"is_error": False, "result": "the limit reached in loop 3 is a bug"}, False),
+        ({"is_error": False, "result": "No findings. The retry stops once you've hit your limit of 3 tries."}, False),
     ],
 )
 def test_usage_limit_detection(event: dict, limited: bool):
@@ -260,11 +263,18 @@ def test_board_run_writes_layout_and_cache(tmp_path: Path, monkeypatch: pytest.M
     assert perf["status"] == "skipped"
 
 
-def test_usage_limit_is_never_an_empty_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+@pytest.mark.parametrize(
+    "stop",
+    [
+        {"is_error": True, "subtype": "error", "result": "You've hit your usage limit · resets 5pm"},
+        # Gate 3: the notice came back as an ordinary reply, and the run was recorded as ok.
+        {"is_error": False, "subtype": "success", "result": "You've hit your 5-hour limit · resets 5:50pm (Asia/Shanghai)"},
+    ],
+)
+def test_usage_limit_is_never_an_empty_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo, stop: dict):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    _run_with(monkeypatch, [_init_event(), {"type": "result", "is_error": True, "subtype": "error",
-                                             "result": "You've hit your usage limit · resets 5pm"}])
+    _run_with(monkeypatch, [_init_event(), {"type": "result", **stop}])
     paths = _paths(tmp_path)
     spec = _spec(tmp_path, "code-review", path, base, head)
     meta = runner.run_one(spec, paths, "B")

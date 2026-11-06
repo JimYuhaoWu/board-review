@@ -9,7 +9,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
-_USAGE_LIMIT = re.compile(r"usage limit|limit reached|rate limit|resets? (at|in)|too many requests", re.I)
+_USAGE_LIMIT = re.compile(
+    r"usage limit|limit reached|rate limit|hit your .*limit|resets? (at|in|\d)|too many requests", re.I
+)
+# A limit stop can also come back as an ordinary reply that is only the notice, such as
+# "You've hit your 5-hour limit · resets 5:50pm (Asia/Shanghai)" (Gate 3). A review that
+# mentions a limit doesn't open like that, and isn't that short.
+_LIMIT_NOTICE = re.compile(r"(you've hit your\b.*\blimit\b|claude ai usage limit reached)", re.I)
+_LIMIT_NOTICE_MAX_CHARS = 200
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*\n?|\n?```\s*$")
 
 
@@ -71,7 +78,8 @@ class ResultInfo(BaseModel):
     def usage_limit(self) -> bool:
         # The exact shape of a plan usage-limit stop isn't documented; match the status and the text.
         if not self.is_error:
-            return False
+            text = self.text.strip()
+            return len(text) <= _LIMIT_NOTICE_MAX_CHARS and bool(_LIMIT_NOTICE.match(text))
         return self.api_error_status == 429 or bool(_USAGE_LIMIT.search(f"{self.text} {self.terminal_reason or ''}"))
 
 
