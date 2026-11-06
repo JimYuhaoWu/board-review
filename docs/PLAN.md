@@ -211,6 +211,10 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
   - **Command:** `gate3 --dataset qodo --judge deepseek-flash --split test --release "Gate 3"` prints WIN, MEMBERS NOT NEEDED, NO DECISION, or NOT DECIDED (too few repeats).
   - **Reported, not deciding:** recall and precision for A1 and A2; a single `/code-review` run (the mean over A1's runs, as in the guardrail); the 13th member's unique finds and marginal recall; the verifier's wrongful refutations of `/code-review`'s findings; cost and time per run; the All profile.
   - **No tuning** between drafting this entry and the result, on either variant.
+  - **Run fixes, decided 2026-11-06 after the runs and before any scoring** (no score seen):
+    - **An empty `ReportFindings` call no longer hides a reply's findings.** Three `/code-review` sessions out of the 212 recorded called `ReportFindings` with an empty list by mistake, then listed 6 findings in the reply and said those count: A1 `redis-4` r3, and the `/code-review` sessions of A2 `firefox_ios-2` r1 and `aspnetcore-10` r1, whose boards therefore got no `code-review` findings. `code_review_found` now falls back to the reply when the accepted call is empty; no other run changes. The two A2 runs are rerun in full, since their boards never saw the findings; A1's run is re-scored.
+    - **`ghost-7` A2 r2 is rerun:** it failed (`failed:extra-findings`) after a denied Bash call, and a failed run is rerun. `ok` runs are kept as they are, so A1 `ghost-7` r3 (a partial review with no findings, after the same denial) stays.
+    - **Ten A1 runs that hit the usage limit** were recorded as `ok` with only the limit notice as their reply; they were rerun before packing, and the runner now catches that notice (#41).
 
 ### Phase 4: full runs, select the default board
 

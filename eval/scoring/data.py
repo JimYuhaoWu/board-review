@@ -183,10 +183,15 @@ def parse_code_review_text(text: str) -> list[dict]:
 
 
 def code_review_found(run_dir: Path) -> list[dict] | None:
-    """A `/code-review` run's findings: its accepted ReportFindings call, else its parsed reply."""
+    """A `/code-review` run's findings: its accepted ReportFindings call, else its parsed reply.
+
+    An accepted call with no findings gives way to a reply that lists findings. In Gate 3, three
+    sessions called ReportFindings with an empty list by mistake, then listed 6 findings in the
+    reply and said those were the ones that count (decided 2026-11-06, before scoring).
+    """
     found = _report_findings(run_dir / "stream.jsonl") if (run_dir / "stream.jsonl").exists() else None
-    if found is None and (run_dir / "final.md").exists():
-        found = parse_code_review_text((run_dir / "final.md").read_text(encoding="utf-8")) or None
+    if not found and (run_dir / "final.md").exists():
+        found = parse_code_review_text((run_dir / "final.md").read_text(encoding="utf-8")) or found
     return found
 
 
