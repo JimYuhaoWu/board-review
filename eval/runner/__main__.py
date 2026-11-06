@@ -4,6 +4,7 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner fetch  [--dataset D] [--data-dir DIR] [--refresh]   # Y1: prs.jsonl, one repo per PR
     uv run python -m eval.runner golden [--dataset D]                                # Y2: golden.jsonl
     uv run python -m eval.runner split  [--dataset D] [--dev-per-repo N]             # Y3: split.json, written once
+    uv run python -m eval.runner draw   [--dataset D] --name N --per-repo K --seed S # Gate 3: <N>.json, written once
 
 --dataset is martian (default) or qodo; it picks the source and eval/datasets/<dataset>/.
     uv run python -m eval.runner run --variant V (--prs IDS | --set S) --repeat N [--dry-run]   # Y4
@@ -48,7 +49,7 @@ from eval.runner.run import (
     BOARD_CR, PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
     run_one, stale_reason,
 )
-from eval.runner.split import SEED, Split, make_split, write_frozen
+from eval.runner.split import SEED, Split, make_draw, make_split, write_frozen
 
 
 def _default_data_dir() -> Path:
@@ -73,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
     split.add_argument("--pilot-per-repo", type=int, default=2)
     split.add_argument("--seed", type=int, default=SEED)
 
+    draw = sub.add_parser("draw", help="draw PRs from the frozen split for a later gate, written once")
+    _add_dataset(draw)
+    draw.add_argument("--name", required=True, help="writes eval/datasets/<dataset>/<name>.json")
+    draw.add_argument("--source", choices=["dev", "test"], default="test")
+    draw.add_argument("--per-repo", type=int, required=True)
+    draw.add_argument("--seed", type=int, required=True)
+
     run = sub.add_parser("run", help="run variants through claude -p (Y4)")
     _add_selection(run)
     run.add_argument("--config-dir", type=Path, default=Path.home() / ".claude-bench")
@@ -92,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         return _golden(args)
     if args.command == "split":
         return _split(args)
+    if args.command == "draw":
+        return _draw(args)
     if args.command == "pack":
         return _pack(args)
     return _run(args)
@@ -172,6 +182,17 @@ def _split(args: argparse.Namespace) -> int:
     write_frozen(path, result)
     print(f"seed {result.seed}: {len(result.dev)} development, {len(result.test)} test -> {path}")
     print(f"pilot: {', '.join(result.pilot)}")
+    return 0
+
+
+def _draw(args: argparse.Namespace) -> int:
+    prs = read_jsonl(args.dataset_dir / "prs.jsonl", PullRequest)
+    split = Split.model_validate_json((args.dataset_dir / "split.json").read_text(encoding="utf-8"))
+    result = make_draw(prs, getattr(split, args.source), seed=args.seed, per_repo=args.per_repo, source=args.source)
+    path = args.dataset_dir / f"{args.name}.json"
+    write_frozen(path, result)
+    print(f"seed {result.seed}: {len(result.prs)} of the {args.source} PRs -> {path}")
+    print(", ".join(result.prs))
     return 0
 
 

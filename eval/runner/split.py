@@ -3,6 +3,9 @@
 Stratified by repo: each repo's runnable PRs are shuffled with a recorded seed, the first
 `dev_per_repo` go to development, the rest to test. The pilot (Phase 3 step 3) takes the first
 `pilot_per_repo` development PRs of each repo, so it is fixed before any run too.
+
+A later gate draws its PRs from one part of the split the same way (`make_draw`, PLAN Phase 3,
+Gate 3), into its own file, also written once.
 """
 
 from __future__ import annotations
@@ -54,8 +57,33 @@ def make_split(prs: list[PullRequest], seed: int = SEED, dev_per_repo: int = 3, 
     )
 
 
-def write_frozen(path: Path, split: Split) -> None:
-    """Write the split once. An existing split is never replaced (PLAN 6.6)."""
+class Draw(BaseModel):
+    seed: int
+    source: str
+    per_repo: int
+    prs: list[str]
+
+
+def make_draw(prs: list[PullRequest], ids: list[str], seed: int, per_repo: int, source: str) -> Draw:
+    """`per_repo` of `ids` from each repo: each repo's sorted ids shuffled with `seed`, as in the split."""
+    repo_of = {pr.id: pr.repo for pr in prs}
+    by_repo: dict[str, list[str]] = {}
+    for pr_id in ids:
+        by_repo.setdefault(repo_of[pr_id], []).append(pr_id)
+
+    rng = random.Random(seed)
+    drawn = []
+    for repo in sorted(by_repo):
+        pool = sorted(by_repo[repo])
+        if len(pool) < per_repo:
+            raise ValueError(f"{repo} has {len(pool)} {source} PRs; the draw needs {per_repo}")
+        rng.shuffle(pool)
+        drawn += pool[:per_repo]
+    return Draw(seed=seed, source=source, per_repo=per_repo, prs=drawn)
+
+
+def write_frozen(path: Path, frozen: BaseModel) -> None:
+    """Write a split or a draw once. An existing one is never replaced (PLAN 6.6)."""
     if path.exists():
-        raise FileExistsError(f"{path} exists; the split is frozen")
-    path.write_text(split.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
+        raise FileExistsError(f"{path} exists; it is frozen")
+    path.write_text(frozen.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")

@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from eval.runner.records import PullRequest
-from eval.runner.split import make_split, write_frozen
+from eval.runner import __main__ as cli
+from eval.runner.records import PullRequest, write_jsonl
+from eval.runner.split import Draw, make_draw, make_split, write_frozen
 
 
 def _prs() -> list[PullRequest]:
@@ -38,3 +39,36 @@ def test_frozen_split_is_never_replaced(tmp_path: Path):
     write_frozen(path, make_split(_prs()))
     with pytest.raises(FileExistsError):
         write_frozen(path, make_split(_prs(), seed=2))
+
+
+def test_draw_takes_per_repo_from_the_given_ids_only():
+    test = make_split(_prs(), seed=1).test
+    draw = make_draw(_prs(), test, seed=5, per_repo=2, source="test")
+    assert (draw.seed, draw.source, draw.per_repo) == (5, "test", 2)
+    assert len(draw.prs) == 4 and set(draw.prs) <= set(test)
+    for repo in ("alpha", "beta"):
+        assert sum(i.startswith(repo) for i in draw.prs) == 2
+
+
+def test_draw_is_reproducible_and_ignores_input_order():
+    test = make_split(_prs(), seed=1).test
+    draw = make_draw(_prs(), test, seed=5, per_repo=2, source="test")
+    assert draw == make_draw(list(reversed(_prs())), list(reversed(test)), seed=5, per_repo=2, source="test")
+    assert draw != make_draw(_prs(), test, seed=6, per_repo=2, source="test")
+
+
+def test_draw_needs_enough_prs_in_each_repo():
+    with pytest.raises(ValueError, match="alpha has 5"):
+        make_draw(_prs(), make_split(_prs(), seed=1).test, seed=5, per_repo=6, source="test")
+
+
+def test_draw_command_writes_the_draw_once(tmp_path: Path):
+    write_jsonl(tmp_path / "prs.jsonl", _prs())
+    split = make_split(_prs(), seed=1)
+    write_frozen(tmp_path / "split.json", split)
+    args = ["draw", "--dataset-dir", str(tmp_path), "--name", "gate3", "--per-repo", "2", "--seed", "5"]
+    assert cli.main(args) == 0
+    written = Draw.model_validate_json((tmp_path / "gate3.json").read_text(encoding="utf-8"))
+    assert written == make_draw(_prs(), split.test, seed=5, per_repo=2, source="test")
+    with pytest.raises(FileExistsError):
+        cli.main([*args[:-1], "6"])
