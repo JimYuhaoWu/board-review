@@ -385,9 +385,11 @@ def test_parse_code_review_text():
 **3.** `docs/README.md`: The README describes the old API.
 """
     assert parse_code_review_text(text) == [
-        {"file": "shop/reports.py", "line": 5, "summary": "user_label still calls get_user(user_id) after the signature change."},
-        {"file": "shop/users.py", "line": 11, "summary": "Pagination offset skips the first page."},
-        {"file": "docs/README.md", "line": None, "summary": "The README describes the old API."},
+        {"file": "shop/reports.py", "line": 5, "summary": "user_label still calls get_user(user_id) after the signature change.",
+         "failure_scenario": "every call raises TypeError."},
+        {"file": "shop/users.py", "line": 11, "summary": "Pagination offset skips the first page.",
+         "failure_scenario": "page 1 returns rows 21-40."},
+        {"file": "docs/README.md", "line": None, "summary": "The README describes the old API.", "failure_scenario": ""},
     ]
     assert parse_code_review_text("No issues found.") == []
 
@@ -509,3 +511,38 @@ def test_per_issue_view_counts_each_dedup_group_once():
     # Ungrouped, c4 (a weaker match for G-sql) is no longer c0's duplicate either: c2, c3, c4 are wrong.
     assert score(rec, parse_view("board:full:raw:issues"))["fp"] == 3
     assert parse_view("code-review:issues").per_issue and parse_view("code-review-x2").per_issue
+
+
+def test_code_review_member_output(tmp_path):
+    """Gate 3, A2: a /code-review run becomes one member_output that the board's schema accepts."""
+    from eval.scoring.data import code_review_member_output
+
+    (tmp_path / "final.md").write_text(
+        "2 findings:\n\n1. `a.py:7`: Off by one in the loop.\n\n   Failure scenario: the last row is skipped.\n\n"
+        "2. `README.md`: The docs describe the old flag.\n", encoding="utf-8")
+    out = code_review_member_output(tmp_path)
+    assert out["member"] == "code-review" and len(out["findings"]) == 2
+    first, second = out["findings"]
+    assert first == {"file": "a.py", "line": 7, "claim": "Off by one in the loop.", "evidence": "the last row is skipped.",
+                     "severity": "High", "category": "bug", "confidence": 0.6}
+    assert second["line"] == 1 and second["evidence"] == ""
+
+    schema = json.loads((Path(__file__).parents[3] / "plugin/skills/review/schema.json").read_text(encoding="utf-8"))
+    finding = schema["$defs"]["finding"]
+    for f in out["findings"]:
+        assert set(finding["required"]) <= set(f) and set(f) <= set(finding["properties"])
+        assert f["severity"] in schema["$defs"]["severity"]["enum"] and f["category"] in schema["$defs"]["category"]["enum"]
+    assert set(out) <= set(schema["$defs"]["member_output"]["properties"])
+
+    empty = tmp_path / "none"
+    empty.mkdir()
+    (empty / "final.md").write_text("I could not review this.", encoding="utf-8")
+    assert code_review_member_output(empty) is None
+
+
+def test_board_cr_views():
+    v = parse_view("board-cr:full:cp:issues")
+    assert v.variant == "board-cr" and v.per_issue and v.labels == frozenset({"CONFIRMED", "PLAUSIBLE"})
+    assert parse_view("board:full:cp").variant == "board-full"
+    with pytest.raises(ValueError):
+        parse_view("board-x:full:cp")

@@ -21,6 +21,10 @@ LABEL_FILTERS = {
 }
 
 
+# View prefix -> run variant. `board-cr` is Gate 3's A2: the full board plus `/code-review` as a member.
+BOARD_VARIANTS = {"board": "board-full", "board-cr": "board-cr"}
+
+
 @dataclass(frozen=True)
 class View:
     name: str
@@ -34,6 +38,7 @@ class View:
 def parse_view(spec: str) -> View:
     """`code-review`, `code-review@whole`, `board-full@whole`, `code-review-x2`, or
     `board:<full|default|id,id>:<confirmed|cp|raw>`, optionally ending in `:ungrouped`.
+    `board-cr:...` is the same over the `board-cr` runs (PLAN Gate 3, A2).
 
     `code-review`, `code-review-x2` and `board:...` may end in `:issues` instead: every finding in
     the view is kept, and each Martian dedup group of them counts once, as a hit if any of its
@@ -46,8 +51,8 @@ def parse_view(spec: str) -> View:
         return View(spec, spec.split(":")[0], ungrouped=True, per_issue=True)
     parts = spec.split(":")
     suffix = parts[3] if len(parts) == 4 else None
-    if parts[0] != "board" or len(parts) not in (3, 4) or parts[2] not in LABEL_FILTERS or suffix not in (None, "ungrouped", "issues"):
-        raise ValueError(f"bad view {spec!r}; use code-review[:issues], code-review@whole, board-full@whole, code-review-x2, or board:<roster>:<confirmed|cp|raw>[:ungrouped|:issues]")
+    if parts[0] not in BOARD_VARIANTS or len(parts) not in (3, 4) or parts[2] not in LABEL_FILTERS or suffix not in (None, "ungrouped", "issues"):
+        raise ValueError(f"bad view {spec!r}; use code-review[:issues], code-review@whole, board-full@whole, code-review-x2, or board[-cr]:<roster>:<confirmed|cp|raw>[:ungrouped|:issues]")
     roster = parts[1]
     if roster == "full":
         members = None
@@ -55,7 +60,7 @@ def parse_view(spec: str) -> View:
         members = frozenset(default_roster())
     else:
         members = frozenset(roster.split(","))
-    return View(spec, "board-full", members, LABEL_FILTERS[parts[2]], suffix is not None, suffix == "issues")
+    return View(spec, BOARD_VARIANTS[parts[0]], members, LABEL_FILTERS[parts[2]], suffix is not None, suffix == "issues")
 
 
 def select(record: dict, view: View) -> tuple[list[int], list[list[int]] | None]:

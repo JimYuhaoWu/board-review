@@ -1,7 +1,7 @@
 ---
 name: review
 description: Board review of a code change. Independent specialist reviewers (intent, edge cases, security, explain-back, plus optional concurrency, contracts, performance, wrong text, line-by-line reading, regressions, boundaries, and tests) each read the change, then separate verifiers label every finding CONFIRMED, PLAUSIBLE, or REFUTED from evidence. Use after a long coding session or before merging, when the user asks for a board review.
-argument-hint: "[--members default|full|id,id] [--format markdown|json] [--intent text | --intent-file path] [target]"
+argument-hint: "[--members default|full|id,id] [--format markdown|json] [--intent text | --intent-file path] [--extra-findings path] [target]"
 allowed-tools: Read Grep Glob Bash(git diff *) Bash(git show *) Bash(git log *) Bash(git rev-parse *) Bash(git merge-base *) Bash(git status *) Bash(git grep *) Bash(git blame *) Bash(git ls-files *) Bash(gh pr view *) Bash(gh pr diff *)
 ---
 
@@ -28,6 +28,7 @@ Arguments: `$ARGUMENTS`
 | `--intent` | text up to the next flag | none |
 | `--intent-file` | path to a text file | none |
 | `--max-findings` | findings per member | `8` |
+| `--extra-findings` | path to a JSON file with one `member_output` object from a reviewer that ran outside this board | none |
 
 Everything else is the **target**. Unknown flags are an error: stop and say which flag is unknown.
 
@@ -78,6 +79,8 @@ Read `${CLAUDE_SKILL_DIR}/roster.json` and the member briefs in `${CLAUDE_SKILL_
 
 Then apply **triggers**. A member with a `trigger` runs only if the diff matches it. Decide from the changed files and the diff, and record a one-line reason for every member you skip.
 
+If `--extra-findings` is given, read the file with Read. It must hold one JSON object matching `member_output`, whose `member` is the reviewer's id, such as `code-review`. This is an **extra member**: it already ran, so don't dispatch it, and don't apply a trigger to it. Its id must not be one of the roster's ids. If the file is missing or isn't valid, record the extra member under `members.failed` with the reason, and continue without it.
+
 ## 5. Dispatch the members
 
 In **one message**, start one Agent per running member, all in parallel, with `subagent_type: "board-review:board-member"` and `run_in_background: false`, so every result comes back in this turn. Don't poll for agents or wait on notifications. Give each member exactly this prompt, filled in:
@@ -100,6 +103,8 @@ Nothing else goes in the prompt.
 ## 6. Collect and group
 
 Each member returns one JSON object (`member_output`). If a member's output isn't valid JSON, or the member failed, record it under `members.failed` with the reason, and continue without it.
+
+Add the extra member's findings, if any, as that member's output, and list its id in `members.ran`. From here on it is a member like any other: its findings are grouped and verified the same way.
 
 Give every finding an id `<member>-<n>`. Then group findings that describe the **same problem**, even if worded differently. Each group gets an id `G1`, `G2`, and so on. Keep every finding; grouping never deletes one. A group's severity is the highest among its findings.
 
@@ -137,7 +142,7 @@ A verifier that fails or returns invalid output counts as PLAUSIBLE for its grou
 
 ### `--format json`
 
-Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones. Set `members.roster` to `default`, `full`, or `custom`.
+Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones. Set `members.roster` to `default`, `full`, or `custom`; an extra member doesn't change it.
 
 Keep the JSON compact: no indentation, and copy each field as the member or verifier wrote it. Keep the whole object under about 30,000 characters. If it would be longer, shorten `evidence` fields to their first sentence, starting with REFUTED findings. Never drop a finding.
 

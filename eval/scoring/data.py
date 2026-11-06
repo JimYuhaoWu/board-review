@@ -164,15 +164,63 @@ def _report_findings(stream: Path) -> list[dict] | None:
 _CR_ITEM = re.compile(r"^\s*(?:\*\*)?(\d+)[.)](?:\*\*)?\s+`([^`]+)`\s*[:—-]?\s*(.+?)\s*$", re.M)
 
 
+_FAILURE = re.compile(r"Failure scenario:\s*(.+)", re.S)
+
+
 def parse_code_review_text(text: str) -> list[dict]:
-    """Findings from `/code-review`'s text reply, as {file, line, summary}; [] if none match."""
+    """Findings from `/code-review`'s text reply, as {file, line, summary, failure_scenario};
+    [] if none match. The failure scenario is the "Failure scenario:" text up to the next item."""
     found = []
-    for m in _CR_ITEM.finditer(text):
+    items = list(_CR_ITEM.finditer(text))
+    for m, nxt in zip(items, [*items[1:], None]):
         location, summary = m.group(2), m.group(3)
         path, _, rest = location.partition(":")
         line = re.match(r"\d+", rest)
-        found.append({"file": path, "line": int(line.group()) if line else None, "summary": summary})
+        tail = _FAILURE.search(text[m.end(): nxt.start() if nxt else len(text)])
+        found.append({"file": path, "line": int(line.group()) if line else None, "summary": summary,
+                      "failure_scenario": " ".join(tail.group(1).split()) if tail else ""})
     return found
+
+
+def code_review_found(run_dir: Path) -> list[dict] | None:
+    """A `/code-review` run's findings: its accepted ReportFindings call, else its parsed reply."""
+    found = _report_findings(run_dir / "stream.jsonl") if (run_dir / "stream.jsonl").exists() else None
+    if found is None and (run_dir / "final.md").exists():
+        found = parse_code_review_text((run_dir / "final.md").read_text(encoding="utf-8")) or None
+    return found
+
+
+EXTRA_MEMBER = "code-review"  # PLAN Gate 3, A2: the board's 13th member, run in its own session
+_CR_CATEGORY = {"security": "security", "concurrency": "concurrency", "performance": "perf", "efficiency": "perf",
+                "test-coverage": "test_gap", "documentation": "doc_defect", "style": "style"}
+
+
+def code_review_member_output(run_dir: Path) -> dict | None:
+    """A finished `/code-review` run as one `member_output` for the board's `--extra-findings`.
+
+    Fixed before any Gate 3 run: `claim` is the finding's summary and `evidence` its failure
+    scenario; severity is High for every finding (`/code-review` reports correctness problems on
+    realistic paths and gives no severity), so each gets the board's second, independent verifier;
+    confidence 0.8 when `/code-review` itself marked the finding CONFIRMED, else 0.6. A finding
+    without a file or line keeps an empty file and line 1. None when the run has no parsable findings.
+    """
+    found = code_review_found(run_dir)
+    if found is None:
+        return None
+    findings = []
+    for f in found:
+        finding = {
+            "file": f.get("file") or "",
+            "line": f.get("line") if isinstance(f.get("line"), int) and f["line"] >= 1 else 1,
+            "claim": f.get("summary") or f.get("short_summary", ""),
+            "evidence": f.get("failure_scenario") or "",
+            "severity": "High",
+            "category": _CR_CATEGORY.get(str(f.get("category", "")).lower(), "bug"),
+            "confidence": 0.8 if f.get("verdict") == "CONFIRMED" else 0.6,
+        }
+        findings.append(finding)
+    return {"member": EXTRA_MEMBER, "findings": findings,
+            "notes": f"Findings of a separate /code-review session ({len(findings)})."}
 
 
 def review_findings(run: Run) -> list[dict] | None:
@@ -184,9 +232,7 @@ def review_findings(run: Run) -> list[dict] | None:
     variant's longer explanations get extracted into extra issues.
     """
     if run.variant == "code-review":
-        found = _report_findings(run.path / "stream.jsonl") if (run.path / "stream.jsonl").exists() else None
-        if found is None and (run.path / "final.md").exists():
-            found = parse_code_review_text((run.path / "final.md").read_text(encoding="utf-8")) or None
+        found = code_review_found(run.path)
         if found is None:
             return None
         return [
