@@ -363,7 +363,7 @@ def cmd_gate2(args) -> None:
     print(f"\n**Gate 2: {'PASS' if passed else 'FAIL'}** (board recall {'>' if passed else '≤'} `/code-review` recall)")
 
 
-GATE3_VIEWS = {"A2": "board:full:cp:issues", "A1": "code-review-x2", "single": "code-review:issues"}
+GATE3_VIEWS = {"A2": "board-cr:full:cp:issues", "A1": "code-review-x2", "single": "code-review:issues"}
 
 
 def cmd_gate3(args) -> None:

@@ -102,7 +102,7 @@ async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = 
     }
     if findings is not None:
         record["findings"] = [{k: f[k] for k in ("id", "member", "label", "group", "file", "line", "text")} for f in findings]
-    if run.variant == "board-full":
+    if run.variant.startswith("board-"):
         record["members"] = parse_board_output((run.path / "final.json").read_text(encoding="utf-8")).get("members", {})
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")

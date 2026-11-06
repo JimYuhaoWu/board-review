@@ -37,6 +37,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 | J2 | **Scoring:** run Martian's extract, dedup, and judge steps unchanged; subset scoring (PLAN 6.2); metrics and the paired bootstrap. See `eval/scoring/README.md` | ✅ built and tested offline; reproduces Martian's published numbers. The live smoke check stopped at the endpoint quota, with the board's per-finding record still to judge |
 | J3 | **Judge gates:** Gate 1 with one paid published judge; Gate 1b for each local judge, including a repeat to test temperature-0 repeatability; a drift check at each judging session (re-judge a fixed sample of pairs), because the endpoint reports no model version. Pace calls for the shared endpoint (PLAN 5.1) | `gate1` (Sonnet 4.5 on OpenRouter) and `gate1b` with the repeat check built; Gate 1 **passed** 2026-11-03 (96.5% agreement, F1 40.1% vs 38.7%); Gate 1b for `deepseek-flash` **passed** 2026-11-04 (mean tau +0.97 vs floor +0.90; repeat check 200/200 same); Gate 1b for `glm-flash` **passed** 2026-11-05 (mean tau +0.97; repeat check 199/200 same) |
 | J4 | **Skill support for Phase 4b:** `model:` in member briefs, and `--verifier-model` | ☐, only if Y6 goes ahead |
+| J6 | **Gate 3 support:** `--extra-findings` in the skill; `code_review_member_output` (a `/code-review` run as one `member_output`); `merge` and the per-issue views; `gate3` | ✅ 2026-11-06 |
 | J5 | **Member card and combined scoring** (PLAN 6.5, 6.7): the card in `python -m eval.scoring members`; scoring a single-member run (Y7) combined with the other members' findings from the full run. See "Testing one member" below | card ✅ (2026-11-04); combined scoring ☐, needs Y7 |
 
 Judging runs only on account A's machine, because the local endpoint key is personal.
@@ -51,9 +52,10 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y4 | **Runner** (PLAN Phase 2, steps 2–4 and 7) | For one (variant, PR, repeat): a fresh worktree at the head commit, the pinned `claude -p` command with `--model`, `--effort`, `--plugin-dir`, the allowed and disallowed tools, and the clean `CLAUDE_CONFIG_DIR`. It checks the `init` event, detects usage-limit stops and resumes later, and writes the layout above. Test it on the smoke repo (`eval/smoke/`), not on benchmark PRs. Parse `final.json` tolerantly: strip a code fence, and restore a missing opening `{`. The campus model dropped it once in the smoke test. Record a repaired parse in `meta.json`. Intent (PLAN 5.1): write the PR title and description to a file outside the worktree and pass `--intent-file` to the board. For `/code-review`, first test on the smoke repo that the same text after the target leaves its review range unchanged; if it doesn't, give the text to neither variant and tell Jim. For `/code-review`, a rejected first `ReportFindings` call (for example `short_summary` over 60 characters) is normal: the model retries it, so it isn't a failed run | ✅ `uv run python -m eval.runner run` (usage in `eval/runner/__main__.py`); smoke-tested on account B |
 | Y5 | **Review the skill pull request** (J1) as a second reader | review comments on the pull request | ✅ review of #8, addressed in #10 |
 | Y7 | **Single-member runs** (PLAN 6.7): run one new or edited member, with its verifiers, on the development PRs, using only that member's usage. See "Testing one member" below | `run --variant board-full --members <id> --set dev --repeat N` writes `board-<id>` runs and the member's cache file; `pack` packs them; tests cover the refusals | ✅ 2026-11-04. Two additions: `run` stops before starting on finished board runs made with an older plugin, and refuses a member whose brief is unchanged since the full run of the same PR and repeat, because the cache path doesn't name the variant and the single run would overwrite the full run's cache file |
+| Y10 | **Gate 3 runs** (PLAN Phase 3, Gate 3). See "Gate 3 (Y10)" below | the `board-cr` variant in the runner; the 24 Gate 3 PRs drawn and merged; `/code-review` r1–r4 and `board-cr` r1–r2 on them, all `ok`, packed and sent | ☐ |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
 | Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ✅ 2026-11-04, 40 runs. Gate 2 v2: FAIL |
-| Y9 | **Gate 2 on Qodo** (PLAN Phase 3). See "Qodo (Y9)" below | `prs.jsonl` and `split.json` for Qodo merged; board and `/code-review`, 2 repeats each, on the 24 sampled PRs, all `ok`, packed and sent | ☐ |
+| Y9 | **Gate 2 on Qodo** (PLAN Phase 3). See "Qodo (Y9)" below | `prs.jsonl` and `split.json` for Qodo merged; board and `/code-review`, 2 repeats each, on the 24 sampled PRs, all `ok`, packed and sent | ✅ 2026-11-05, 96 runs. Gate 2 on Qodo: FAIL |
 | — | Runs on account B (Phases 3–5), as assigned in PLAN 7.3 | | later |
 
 Y1–Y4 cost no Claude usage, except a few smoke-repo runs to test Y4.
@@ -90,6 +92,28 @@ Gate 2 failed on Martian. The same rule is now tested on Qodo PR-Review-Bench, a
 **Don't open the PRs' GitHub pages or their comments.** Five Ghost PRs carry an outside comment that lists the injected issues (SOURCE.md). The reviewers can't reach it, and neither should anyone who might later look at the findings.
 
 **Budget.** Y8 cost $19.12 for 20 board runs, about $1 each. Qodo PRs are often larger (median 208 changed lines), so expect $1–1.5 per board run: about $50–70 for 48 board runs, plus about $4 for 48 `/code-review` runs. That's within the usage ceiling (PLAN section 7); if a usage stop comes first, run the same command again after the reset.
+
+## Gate 3 (Y10)
+
+Gate 2 failed on Qodo too. Gate 3 (PLAN Phase 3, agreed 2026-11-06) asks whether the board adds anything on top of `/code-review`: **A2**, the full board with `/code-review` as a 13th member, against **A1**, `/code-review` run twice and merged. Recall decides. The 12 briefs are unchanged; the only skill change is the new `--extra-findings` option.
+
+1. **Pull `main`**, and record the commit (`git log -1`): it is the plugin commit for every Gate 3 board run.
+2. **Add the `board-cr` variant to the runner.** One `board-cr` run (PR, repeat) is:
+   1. a `/code-review` session, exactly as the `code-review` variant runs it, stored in the run's own folder (`eval/results/qodo/board-cr/<pr>/r<n>/code-review/`, same files as a `code-review` run). Never write it under `eval/results/qodo/code-review/`: A2's `/code-review` runs are independent of A1's.
+   2. `eval.scoring.data.code_review_member_output(<that folder>)`, written as JSON to a file **outside the worktree**, like the intent file. If it returns None (no parsable findings), the run is `failed:extra-findings`: report it, don't run the board.
+   3. the board session: `/board-review:review --members full --max-findings 8 --format json --intent-file <intent> --extra-findings <file> <base>..<head>`, with `--add-dir` for the file's folder.
+   The run's `meta.json` records both sessions' cost and time, and the extra-findings file's hash. A usage stop in either session makes the run `failed:usage-limit`; a retry redoes both. Add tests, as for the other variants.
+3. **Smoke-test** `board-cr` on the smoke repo (`eval/smoke/`) before any Qodo run. Check: `final.json` lists `code-review` in `members.ran`, the `code-review-<n>` findings carry verifier labels, and `permission_denials` is 0.
+4. **Draw the 24 Gate 3 PRs**, before any run: 3 per repository from the Qodo test split, seed **20261107**, written to `eval/datasets/qodo/gate3.json` with the seed. `split.json` is not changed. Open a pull request with the draw code and `gate3.json`, and wait for it to be merged.
+5. **Run**, with `--dataset-dir eval/datasets/qodo` and `--prs <the 24 ids>`. Check with `--dry-run` first, then in this order, so a usage stop leaves complete sets first:
+   - `board-cr` repeat 1; `code-review` repeats 1 and 2
+   - `board-cr` repeat 2; `code-review` repeats 3 and 4
+6. **Check** as in Y8: every run `ok`, `permission_denials` 0, `members.failed` empty, and `code-review` in every `board-cr` run's `members.ran`. Report anything unusual rather than re-running silently.
+7. **Pack** `board-cr` and `code-review`, all repeats, and send the zips.
+
+**Don't open the PRs' GitHub pages or their comments** (Y9).
+
+**Budget.** About $1–1.5 per board session and $0.05–0.10 per `/code-review` session: about $50–70 for 48 board sessions plus about $10 for 144 `/code-review` sessions (96 for A1, 48 inside `board-cr`). That's close to Y9's; if a usage stop comes first, run the same command again after the reset.
 
 ## Testing one member (Y7 and J5)
 
