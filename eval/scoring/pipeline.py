@@ -109,6 +109,63 @@ async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = 
     return out
 
 
+MERGED = "code-review-x2"  # two `/code-review` runs merged into one review (PLAN Gate 3, variant A1)
+
+
+async def merge_records(records: list[dict], jm: JudgeModel, repeat: int) -> Path:
+    """Merge judged `/code-review` records of one PR into one review, variant `code-review-x2`.
+
+    Candidates and verdicts are concatenated, so no match call is new. Finding ids get the source
+    repeat as a prefix (`r1/cr-1`). Martian's strict dedup step then runs once over the merged
+    candidates, and the view `code-review-x2` counts each dedup group once, a hit if any of its
+    findings matches: the same rule as `board:full:cp:issues` (PLAN Gate 3). No finding is chosen
+    over another, so nothing that either run found is lost by the merge.
+    """
+    first = records[0]
+    if len(records) < 2 or any(r["variant"] != "code-review" for r in records):
+        raise ValueError("merge needs two or more code-review records")
+    if any((r["dataset"], r["pr_id"], r["golden"]) != (first["dataset"], first["pr_id"], first["golden"]) for r in records):
+        raise ValueError("records to merge must be of one PR, with the same golden comments")
+    if len({r["judge"]["fingerprint"] for r in records}) > 1:
+        raise ValueError("records to merge were judged by different served models")
+
+    candidates, findings = [], []
+    for r in records:
+        prefix = f"r{r['repeat']}/"
+        findings += [{**f, "id": prefix + f["id"], "group": None} for f in r.get("findings", [])]
+        for i, c in enumerate(r["candidates"]):
+            fid = prefix + (c["finding"] or f"x{i}")
+            if not c["finding"]:  # a reply without structured findings: each extracted issue stands as one
+                findings.append({"id": fid, "member": None, "label": None, "group": None,
+                                 "file": None, "line": None, "text": c["text"]})
+            candidates.append({**c, "finding": fid})
+    verdicts = [sum((r["verdicts"][g] for r in records), []) for g in range(len(first["golden"]))]
+
+    groups, fell_back = await jm.dedup([c["text"] for c in candidates])
+
+    record = {
+        "schema_version": SCHEMA_VERSION,
+        "dataset": first["dataset"],
+        "variant": MERGED,
+        "pr_id": first["pr_id"],
+        "repeat": repeat,
+        "merged_from": [r["repeat"] for r in records],
+        "source_sha256": hashlib.sha256("".join(r["source_sha256"] for r in records).encode()).hexdigest(),
+        "judge": first["judge"],
+        "golden": first["golden"],
+        "candidates": candidates,
+        "groups": groups,
+        "dedup_fallback": fell_back,
+        "verdicts": verdicts,
+        "run_meta": [r["run_meta"] for r in records],
+        "findings": findings,
+    }
+    out = record_path(first["dataset"], first["judge"]["model"], MERGED, first["pr_id"], repeat)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    return out
+
+
 def load_records(dataset: str, judge: str, variant: str, pr_ids: list[str]) -> list[dict]:
     records = []
     for pid in pr_ids:

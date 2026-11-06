@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from .data import default_roster, representatives
 from .martian import step3_judge_comments as m3
-from .pipeline import WHOLE
+from .pipeline import MERGED, WHOLE
 
 LABEL_FILTERS = {
     "confirmed": frozenset({"CONFIRMED"}),
@@ -28,17 +28,26 @@ class View:
     members: frozenset[str] | None = None
     labels: frozenset[str] | None = None
     ungrouped: bool = False  # diagnostic: every finding counts, not one per board group
+    per_issue: bool = False  # one count per Martian dedup group, a hit if any of its findings matches (Gate 3)
 
 
 def parse_view(spec: str) -> View:
-    """`code-review`, `code-review@whole`, `board-full@whole`, or
-    `board:<full|default|id,id>:<confirmed|cp|raw>`, optionally ending in `:ungrouped`."""
+    """`code-review`, `code-review@whole`, `board-full@whole`, `code-review-x2`, or
+    `board:<full|default|id,id>:<confirmed|cp|raw>`, optionally ending in `:ungrouped`.
+
+    `code-review`, `code-review-x2` and `board:...` may end in `:issues` instead: every finding in
+    the view is kept, and each Martian dedup group of them counts once, as a hit if any of its
+    findings matches. This is the one rule Gate 3 applies to both of its variants; `code-review-x2`
+    always uses it.
+    """
     if spec in ("code-review", "code-review" + WHOLE, "board-full" + WHOLE):
         return View(spec, spec)
+    if spec in ("code-review:issues", MERGED, MERGED + ":issues"):
+        return View(spec, spec.split(":")[0], ungrouped=True, per_issue=True)
     parts = spec.split(":")
-    ungrouped = len(parts) == 4 and parts[3] == "ungrouped"
-    if parts[0] != "board" or len(parts) not in (3, 4) or parts[2] not in LABEL_FILTERS or (len(parts) == 4 and not ungrouped):
-        raise ValueError(f"bad view {spec!r}; use code-review, code-review@whole, board-full@whole, or board:<roster>:<confirmed|cp|raw>[:ungrouped]")
+    suffix = parts[3] if len(parts) == 4 else None
+    if parts[0] != "board" or len(parts) not in (3, 4) or parts[2] not in LABEL_FILTERS or suffix not in (None, "ungrouped", "issues"):
+        raise ValueError(f"bad view {spec!r}; use code-review[:issues], code-review@whole, board-full@whole, code-review-x2, or board:<roster>:<confirmed|cp|raw>[:ungrouped|:issues]")
     roster = parts[1]
     if roster == "full":
         members = None
@@ -46,7 +55,7 @@ def parse_view(spec: str) -> View:
         members = frozenset(default_roster())
     else:
         members = frozenset(roster.split(","))
-    return View(spec, "board-full", members, LABEL_FILTERS[parts[2]], ungrouped)
+    return View(spec, "board-full", members, LABEL_FILTERS[parts[2]], suffix is not None, suffix == "issues")
 
 
 def select(record: dict, view: View) -> tuple[list[int], list[list[int]] | None]:
@@ -106,9 +115,16 @@ def score(record: dict, view: View) -> dict:
     """Martian's evaluate_review result for the view's candidates."""
     idx, groups = select(record, view)
     texts = [record["candidates"][i]["text"] for i in idx]
-    return _loop.run_until_complete(
+    result = _loop.run_until_complete(
         m3.evaluate_review(_RecordedJudge(record), record["golden"], texts, groups)
     )
+    if view.per_issue:
+        # Martian already marks a match's duplicates as matched; here each group of unmatched
+        # findings is one false positive, so an issue reported twice costs one, not two.
+        unmatched = {fp["candidate"] for fp in result["false_positives"]}
+        issues = groups or [[i] for i in range(len(texts))]
+        result["fp"] = sum(1 for g in issues if all(texts[i] in unmatched for i in g))
+    return result
 
 
 def panel(results: list[dict]) -> dict:

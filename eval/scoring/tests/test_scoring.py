@@ -455,3 +455,57 @@ def test_gate2_needs_two_repeats(monkeypatch, capsys):
     cli.cmd_gate2(args)
     out = capsys.readouterr().out
     assert "NOT DECIDED" not in out and "Gate 2: FAIL" in out  # the same review on both sides: no recall gain
+
+
+def test_merge_two_code_review_runs(tmp_path, monkeypatch):
+    """Gate 3, A1: an issue found by both runs counts once, and nothing either run found is lost."""
+    monkeypatch.setattr(pipeline, "RESULTS", tmp_path / "results")
+    golden = [{"comment": "G-a", "severity": "Unrated", "category": "bug"},
+              {"comment": "G-b", "severity": "Unrated", "category": "bug"}]
+
+    def rec(repeat, texts, matches):
+        cands = [{"text": t, "finding": f"cr-{i + 1}", "member": None, "label": None} for i, t in enumerate(texts)]
+        return {"schema_version": 1, "dataset": "d", "variant": "code-review", "pr_id": "p1", "repeat": repeat,
+                "source_sha256": str(repeat), "judge": {"model": "fake-model", "fingerprint": "f1", "served": {}},
+                "golden": golden, "candidates": cands, "groups": None, "dedup_fallback": False,
+                "verdicts": [[{"match": (g["comment"], t) in matches, "confidence": 0.9, "reasoning": ""} for t in texts]
+                             for g in golden],
+                "run_meta": {}, "findings": [{"id": c["finding"], "member": None, "label": None, "group": None,
+                                              "file": None, "line": None, "text": c["text"]} for c in cands]}
+
+    r1 = rec(1, ["a, run 1", "noise 1"], {("G-a", "a, run 1")})
+    r2 = rec(2, ["a, run 2", "b, run 2"], {("G-a", "a, run 2"), ("G-b", "b, run 2")})
+    r2["candidates"].append({"text": "bare extracted issue", "finding": None, "member": None, "label": None})
+    for row in r2["verdicts"]:
+        row.append({"match": False, "confidence": 0.1, "reasoning": ""})
+
+    class Dedup(FakeJudge):
+        async def dedup(self, texts):
+            assert texts == ["a, run 1", "noise 1", "a, run 2", "b, run 2", "bare extracted issue"]
+            return [[0, 2], [1], [3], [4]], False
+
+    loop = asyncio.new_event_loop()
+    out = loop.run_until_complete(pipeline.merge_records([r1, r2], Dedup(), 1))
+    m = json.loads(out.read_text(encoding="utf-8"))
+    assert m["variant"] == "code-review-x2" and m["merged_from"] == [1, 2]
+    assert [c["finding"] for c in m["candidates"]] == ["r1/cr-1", "r1/cr-2", "r2/cr-1", "r2/cr-2", "r2/x2"]
+    assert len(m["verdicts"][0]) == 5 and m["groups"] == [[0, 2], [1], [3], [4]]
+    merged = score(m, parse_view("code-review-x2"))
+    assert merged["tp"] == 2 and merged["fp"] == 2  # "a" counts once; "noise 1" and the bare issue are wrong
+    # Shared rule: a group is a hit if any finding matches, whichever run's comes first.
+    m["verdicts"][0][0] = {"match": False, "confidence": 0.1, "reasoning": ""}
+    again = score(m, parse_view("code-review-x2"))
+    assert again["tp"] == 2 and again["fp"] == 2
+    with pytest.raises(ValueError):
+        loop.run_until_complete(pipeline.merge_records([r1, {**r2, "pr_id": "p2"}], Dedup(), 1))
+
+
+def test_per_issue_view_counts_each_dedup_group_once():
+    rec = _record()  # Martian groups [[0, 4], [1, 2], [3]]
+    issues = score(rec, parse_view("board:full:raw:issues"))
+    assert issues["tp"] == 2 and issues["fp"] == 1  # only the nitpicker's group is wrong
+    rec["groups"] = [[0], [1], [2], [3], [4]]
+    rec["verdicts"][1][2]["match"] = False  # c2 no longer matches, and isn't grouped with c1
+    # Ungrouped, c4 (a weaker match for G-sql) is no longer c0's duplicate either: c2, c3, c4 are wrong.
+    assert score(rec, parse_view("board:full:raw:issues"))["fp"] == 3
+    assert parse_view("code-review:issues").per_issue and parse_view("code-review-x2").per_issue
