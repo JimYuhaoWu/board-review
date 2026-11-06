@@ -453,7 +453,7 @@ def test_board_cr_runs_code_review_then_the_board_with_its_findings(
     assert json.loads(extra)["findings"][0]["file"] == "a.py"
     assert not inputs.exists(), "input folder removed after the run"
 
-    assert meta.extra_findings == {"sha256": hashlib.sha256(extra.encode("utf-8")).hexdigest()[:12], "findings": 1}
+    assert meta.extra_findings == {"sha256": hashlib.sha256(extra.encode("utf-8")).hexdigest()[:12], "findings": 1, "parsed": True}
     assert meta.sessions["code-review"]["total_cost_usd"] == 0.1 and meta.sessions["board"]["total_cost_usd"] == 1.5
     assert meta.total_cost_usd == pytest.approx(1.6) and meta.permission_denials == 1
     assert meta.members["ran"][-1] == "code-review"
@@ -461,20 +461,41 @@ def test_board_cr_runs_code_review_then_the_board_with_its_findings(
     assert not paths.cache.exists(), "board-cr writes no cache files"
 
 
-def test_board_cr_without_review_findings_never_starts_the_board(
+def test_board_cr_without_review_findings_runs_the_board_with_an_empty_member(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo
 ):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    started = _run_sessions(monkeypatch, [_init_event(), _review_result("No issues found.", total_cost_usd=0.05)])
+    started = _run_sessions(
+        monkeypatch,
+        [_init_event(), _review_result("No issues found.", total_cost_usd=0.05)],
+        [_init_event(), {**_board_result(BOARD), "total_cost_usd": 1.5}],
+    )
     paths = _paths(tmp_path)
     spec = _spec(tmp_path, "board-cr", path, base, head)
     meta = runner.run_one(spec, paths, "B")
 
-    assert meta.status == "failed:extra-findings"
+    assert meta.status == "ok", meta.detail
+    assert len(started) == 2, "the board ran"
+    assert json.loads(started[1].inputs["extra-findings.json"]) == {"member": "code-review", "findings": []}
+    assert meta.extra_findings["findings"] == 0 and meta.extra_findings["parsed"] is False
+    assert meta.total_cost_usd == pytest.approx(1.55) and list(meta.sessions) == ["code-review", "board"]
+    assert runner.is_done(paths, spec)
+
+
+def test_board_cr_failed_review_never_starts_the_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    failed = {"type": "result", "is_error": True, "subtype": "error_during_execution", "result": "boom"}
+    started = _run_sessions(monkeypatch, [_init_event(), failed])
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-cr", path, base, head)
+    meta = runner.run_one(spec, paths, "B")
+
+    assert meta.status == "failed:code-review"
     assert len(started) == 1, "the board never started"
-    assert (runner.run_dir(paths, spec) / "code-review" / "final.md").exists()
-    assert meta.total_cost_usd == 0.05 and list(meta.sessions) == ["code-review"]
+    assert (runner.run_dir(paths, spec) / "code-review" / "meta.json").exists()
+    assert list(meta.sessions) == ["code-review"]
     assert not runner.is_done(paths, spec)
 
 

@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from eval.runner import gitrepo
 from eval.runner.records import ROOT
 from eval.runner.stream import ExpectedSetup, InitInfo, ResultInfo, parse_board_json, setup_problems
-from eval.scoring.data import code_review_member_output
+from eval.scoring.data import EXTRA_MEMBER, code_review_member_output
 
 PINNED_VERSION = "2.1.317"
 MODEL = "claude-sonnet-5-5"
@@ -347,23 +347,27 @@ def _run_board_cr(spec: RunSpec, paths: Paths, account: str, out: Path, run_work
     review_spec = spec.model_copy(update={"variant": "code-review"})
     review = _session(review_spec, paths, account, review_out, run_work / "code-review")
     (review_out / "meta.json").write_text(review.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    extra = code_review_member_output(review_out) if review.status == "ok" else None
-    if extra is None:
+    if review.status != "ok":
         if review.status == "failed:usage-limit":
             status, detail = review.status, review.detail
-        elif review.status != "ok":
-            status, detail = "failed:code-review", f"{review.status}: {review.detail or ''}"
         else:
-            status, detail = "failed:extra-findings", "the /code-review session has no parsable findings"
+            status, detail = "failed:code-review", f"{review.status}: {review.detail or ''}"
         meta = review.model_copy(update={"variant": spec.variant, "roster": spec.members, "status": status,
                                          "detail": detail})
         return _add_sessions(meta, {"code-review": review})
 
+    # A finished /code-review session whose reply lists no findings still leaves the board to run, as
+    # it would in use: the extra member is then empty (Gate 3, ghost-7, decided 2026-11-06). The flag
+    # `parsed: false` marks it, since a reply in a format the parser misses looks the same.
+    extra = code_review_member_output(review_out)
+    parsed = extra is not None
+    if extra is None:
+        extra = {"member": EXTRA_MEMBER, "findings": []}
     text = json.dumps(extra, ensure_ascii=False, indent=1) + "\n"
     board = _session(spec, paths, account, out, run_work, extra_findings=text)
     board.started_at = review.started_at
     board.extra_findings = {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
-                            "findings": len(extra["findings"])}
+                            "findings": len(extra["findings"]), "parsed": parsed}
     return _add_sessions(board, {"code-review": review, "board": board})
 
 
