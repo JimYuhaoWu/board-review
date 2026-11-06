@@ -561,6 +561,25 @@ def test_code_review_member_output(tmp_path):
     assert code_review_member_output(empty) is None
 
 
+def test_empty_report_call_gives_way_to_reply_findings(tmp_path):
+    """Gate 3: an accepted ReportFindings call with no findings, then the findings in the reply."""
+    from eval.scoring.data import code_review_found
+
+    call = [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "ReportFindings",
+                                                       "input": {"findings": []}}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}},
+    ]
+    (tmp_path / "stream.jsonl").write_text("\n".join(json.dumps(x) for x in call), encoding="utf-8")
+    (tmp_path / "final.md").write_text(
+        "I called ReportFindings with an empty list by mistake. The findings below count.\n\n"
+        "1. `a.py:7`: Off by one in the loop.\n\n   Failure scenario: the last row is skipped.\n", encoding="utf-8")
+    assert [f["file"] for f in code_review_found(tmp_path)] == ["a.py"]
+
+    (tmp_path / "final.md").write_text("No issues found.", encoding="utf-8")
+    assert code_review_found(tmp_path) == []  # a clean review with an empty call stays a clean review
+
+
 def test_board_cr_views():
     v = parse_view("board-cr:full:cp:issues")
     assert v.variant == "board-cr" and v.per_issue and v.labels == frozenset({"CONFIRMED", "PLAUSIBLE"})
