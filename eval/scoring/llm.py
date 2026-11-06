@@ -31,7 +31,7 @@ class LLMError(RuntimeError):
 
 class EndpointBusy(BaseException):
     """A call failed for a reason outside the request: HTTP 429 (the cluster throttles when its
-    queue is long) or a lost connection (VPN). A BaseException, so it passes through Martian's
+    queue is long), an HTTP 5xx from the endpoint or its upstream, or a lost connection (VPN). A BaseException, so it passes through Martian's
     `except Exception` retry loops; JudgeModel pauses and then repeats the call itself."""
 
 
@@ -144,7 +144,7 @@ class JudgeModel:
         async def flagged(*args, **kwargs):
             try:
                 return await create(*args, **kwargs)
-            except (openai.RateLimitError, openai.APIConnectionError) as e:
+            except (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError) as e:
                 raise EndpointBusy(f"{type(e).__name__}: {e}") from None
 
         client.chat.completions.create = flagged
