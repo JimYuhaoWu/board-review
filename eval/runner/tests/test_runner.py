@@ -522,10 +522,63 @@ def test_board_cr_usage_stop_in_either_session_redoes_both(
 def test_board_cr_runs_the_full_board(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     common = ["run", "--variant", "board-cr", "--prs", DEV_PR, "--repeat", "1", "--dry-run",
               "--results-dir", str(tmp_path)]
-    with pytest.raises(SystemExit, match="--members must be full"):
+    with pytest.raises(SystemExit, match="sets its own roster"):
         cli.main([*common, "--members", "edge"])
     cli.main(common)
     out = capsys.readouterr().out
     assert f"martian/board-cr/{DEV_PR}/r1 (to run)" in out
     assert "/code-review medium --max-findings all" in out
     assert "--intent-file <intent-file> --extra-findings <extra-findings-file>" in out
+
+
+def test_board_none_runs_the_board_with_no_members(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    common = ["run", "--variant", "board-none", "--prs", TEST_PR, "--repeat", "1", "--dry-run",
+              "--results-dir", str(tmp_path)]
+    with pytest.raises(SystemExit, match="sets its own roster"):
+        cli.main([*common, "--members", "default"])
+    cli.main(common)
+    out = capsys.readouterr().out
+    assert f"martian/board-none/{TEST_PR}/r1 (to run)" in out
+    assert "/code-review medium --max-findings all" in out
+    assert "--members none --max-findings 8 --format json --intent-file <intent-file> --extra-findings" in out
+
+
+def test_board_none_records_both_sessions_and_writes_no_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo
+):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    board = {**BOARD, "members": {"roster": "none", "ran": ["code-review"], "skipped": [], "failed": []}}
+    started = _run_sessions(
+        monkeypatch,
+        [_init_event(), _review_result(total_cost_usd=0.1)],
+        [_init_event(), {**_board_result(board), "total_cost_usd": 0.2}],
+    )
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-none", path, base, head).model_copy(update={"members": "none"})
+    meta = runner.run_one(spec, paths, "B")
+
+    assert meta.status == "ok", meta.detail
+    assert "--members none " in started[1].command[2] and "--extra-findings " in started[1].command[2]
+    assert meta.roster == "none" and meta.extra_findings["findings"] == 1
+    assert meta.total_cost_usd == pytest.approx(0.3)
+    assert runner.cache_clash(paths, spec) is None
+    assert not paths.cache.exists(), "board-none writes no cache files"
+
+
+def test_default_board_runs_on_test_prs(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    cli.main(["run", "--variant", "board-full", "--members", "default", "--prs", f"{DEV_PR},{TEST_PR}",
+              "--repeat", "1", "--dry-run", "--results-dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert f"martian/board-default/{TEST_PR}/r1 (to run)" in out
+    assert "--members default --max-findings 8" in out
+
+
+def test_default_board_writes_no_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    _run_with(monkeypatch, [_init_event(), _board_result(BOARD)])
+    paths = _paths(tmp_path)
+    spec = _spec(tmp_path, "board-default", path, base, head).model_copy(update={"members": "default"})
+    assert runner.run_one(spec, paths, "B").status == "ok"
+    assert runner.cache_clash(paths, spec) is None
+    assert not paths.cache.exists(), "the default board's labels come from a smaller roster"

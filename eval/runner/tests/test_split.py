@@ -72,3 +72,19 @@ def test_draw_command_writes_the_draw_once(tmp_path: Path):
     assert written == make_draw(_prs(), split.test, seed=5, per_repo=2, source="test")
     with pytest.raises(FileExistsError):
         cli.main([*args[:-1], "6"])
+
+
+def test_draw_command_leaves_out_earlier_draws(tmp_path: Path):
+    write_jsonl(tmp_path / "prs.jsonl", _prs())
+    split = make_split(_prs(), seed=1)
+    write_frozen(tmp_path / "split.json", split)
+    base = ["draw", "--dataset-dir", str(tmp_path), "--seed", "5"]
+    assert cli.main([*base, "--name", "gate3", "--per-repo", "2"]) == 0
+    assert cli.main([*base, "--name", "gate4", "--per-repo", "3"]) == 0
+    gate3 = Draw.model_validate_json((tmp_path / "gate3.json").read_text(encoding="utf-8"))
+    gate4 = Draw.model_validate_json((tmp_path / "gate4.json").read_text(encoding="utf-8"))
+    assert not set(gate3.prs) & set(gate4.prs)
+    rest = [i for i in split.test if i not in gate3.prs]
+    assert gate4 == make_draw(_prs(), rest, seed=5, per_repo=3, source="test")
+    with pytest.raises(ValueError, match="alpha has 0"):
+        cli.main([*base, "--name", "gate5", "--per-repo", "1"])

@@ -23,7 +23,7 @@ Arguments: `$ARGUMENTS`
 
 | Flag | Values | Default |
 |---|---|---|
-| `--members` | `default`, `full`, or comma-separated member ids | ask the user (step 4); `default` when you can't ask |
+| `--members` | `default`, `full`, `none` (only with `--extra-findings`), or comma-separated member ids | ask the user (step 4); `default` when you can't ask |
 | `--format` | `markdown` or `json` | `markdown` |
 | `--intent` | text up to the next flag | none |
 | `--intent-file` | path to a text file | none |
@@ -70,6 +70,7 @@ Read `${CLAUDE_SKILL_DIR}/roster.json` and the member briefs in `${CLAUDE_SKILL_
 
 - `--members default` or `full`: use that roster from `roster.json`.
 - `--members a,b,c`: use exactly those ids. An unknown id is an error: stop and list the valid ids.
+- `--members none`: no members run; only the extra member's findings are grouped and verified, and `members.roster` is `none`. Without `--extra-findings` it is an error: stop and say so.
 - No `--members`, and you can ask the user: use AskUserQuestion with `multiSelect: true`, two questions:
   1. "Core members": the members in the `default` roster, labels marked "(Recommended)".
   2. "Optional members": the other members.
@@ -142,7 +143,7 @@ A verifier that fails or returns invalid output counts as PLAUSIBLE for its grou
 
 ### `--format json`
 
-Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones. Set `members.roster` to `default`, `full`, or `custom`; an extra member doesn't change it.
+Your final message is **one JSON object** matching `board_output` in `${CLAUDE_SKILL_DIR}/schema.json`, with no text before or after it and no code fence. Include every finding with its label, including REFUTED ones. Set `members.roster` to `default`, `full`, `none`, or `custom`; an extra member doesn't change it.
 
 Keep the JSON compact: no indentation, and copy each field as the member or verifier wrote it. Keep the whole object under about 30,000 characters. If it would be longer, shorten `evidence` fields to their first sentence, starting with REFUTED findings. Never drop a finding.
 

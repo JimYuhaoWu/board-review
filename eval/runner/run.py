@@ -11,7 +11,12 @@ before it runs again.
 A `board-cr` run (PLAN Phase 3, Gate 3, A2) is two sessions: a `/code-review` session stored in
 the run's `code-review/` folder, then the full board with that session's findings as the extra
 member `code-review` (`--extra-findings`). A failure in either session leaves the run unfinished,
-so a retry redoes both.
+so a retry redoes both. A `board-none` run (Gate 4, B1) is the same with no members
+(`--members none`): the board only groups and verifies `/code-review`'s findings.
+
+Only full runs and members run alone write cache files, the labels offline scoring re-combines.
+`board-default`, `board-cr` and `board-none` runs write none: the cache path doesn't name the
+variant, and their labels come from a different roster.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ MODEL = "claude-sonnet-5-5"
 EFFORT = "medium"
 VARIANTS = ("code-review", "board-full")
 BOARD_CR = "board-cr"
+BOARD_NONE = "board-none"
+TWO_SESSION = (BOARD_CR, BOARD_NONE)
 # ReportFindings is how /code-review hands back structured findings, which scoring reads (TASKS).
 TOOLS = ["Read", "Grep", "Glob", "Bash", "Task", "ReportFindings"]
 _READ_ONLY_COMMANDS = [
@@ -115,7 +122,7 @@ class RunMeta(BaseModel):
     permission_denials: int = 0
     members: dict[str, Any] | None = None
     setup: InitInfo | None = None
-    # board-cr only: each session's cost, time, and denials (the top-level ones are their sums),
+    # board-cr and board-none only: each session's cost, time, and denials (the top-level ones are their sums),
     # and the hash and size of the extra-findings file the board read.
     sessions: dict[str, dict[str, Any]] = {}
     extra_findings: dict[str, Any] | None = None
@@ -159,9 +166,8 @@ def cache_clash(paths: Paths, spec: RunSpec) -> str | None:
     The cache path doesn't name the variant. A member run alone while its brief is unchanged
     since a full run of the same PR and repeat would replace that run's file, and would measure
     nothing new. A full run may replace a single-member file: scoring starts from the full run.
-    board-cr runs write no cache files.
     """
-    if spec.variant in ("board-full", BOARD_CR):
+    if spec.variant == "board-full" or not writes_cache(spec):
         return None
     hashes = skill_hashes()
     config = config_hash(spec, PINNED_VERSION, hashes)
@@ -172,6 +178,10 @@ def cache_clash(paths: Paths, spec: RunSpec) -> str | None:
             if source != run_name(spec):
                 return source
     return None
+
+
+def writes_cache(spec: RunSpec) -> bool:
+    return spec.variant.startswith("board-") and spec.variant not in TWO_SESSION and spec.members != "default"
 
 
 def cache_file(cache: Path, spec: RunSpec, member: str, config: str, member_hash: str) -> Path:
@@ -326,22 +336,18 @@ def run_one(spec: RunSpec, paths: Paths, account: str) -> RunMeta:
         shutil.rmtree(out)
     out.mkdir(parents=True)
     run_work = paths.work / spec.dataset / spec.variant / spec.pr_id
-    if spec.variant == BOARD_CR:
+    if spec.variant in TWO_SESSION:
         meta = _run_board_cr(spec, paths, account, out, run_work)
     else:
         meta = _session(spec, paths, account, out, run_work)
-        if meta.status == "ok" and spec.variant.startswith("board-"):
+        if meta.status == "ok" and writes_cache(spec):
             _write_cache(paths.cache, spec, meta, json.loads((out / "final.json").read_text(encoding="utf-8")))
     (out / "meta.json").write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return meta
 
 
 def _run_board_cr(spec: RunSpec, paths: Paths, account: str, out: Path, run_work: Path) -> RunMeta:
-    """`/code-review` in its own session, then the full board with its findings as an extra member.
-
-    No cache files: the cache path doesn't name the variant, so they would replace a board-full
-    run's files, and these members' labels were made with a 13th member present.
-    """
+    """`/code-review` in its own session, then the board (`spec.members`) with its findings as an extra member."""
     review_out = out / "code-review"
     review_out.mkdir()
     review_spec = spec.model_copy(update={"variant": "code-review"})

@@ -11,6 +11,9 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner run --variant board-full --members ID (--prs IDS | --set dev|pilot) \\
         --repeat N                                                                            # Y7: one member
     uv run python -m eval.runner run --variant board-cr (--prs IDS | --set S) --repeat N         # Gate 3, A2
+    uv run python -m eval.runner run --variant board-none (--prs IDS | --set S) --repeat N       # Gate 4, B1
+    uv run python -m eval.runner run --variant board-full --members default (--prs IDS | --set S) \
+        --repeat N                                                                            # Gate 4, B2
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
     uv run python -m eval.runner pack --variant V [--members ID] (--prs IDS | --set S) --repeat N   # zip for judging
@@ -25,7 +28,9 @@ A single-member run (PLAN 6.7) runs one member and its verifiers on development 
 the variant folder `board-<id>`, with the same repeat numbers as the full runs it is scored with.
 
 A `board-cr` run (PLAN Phase 3, Gate 3) runs `/code-review`, then the full board with its findings
-as the extra member `code-review`. `--variant both` stays `code-review` and `board-full`.
+as the extra member `code-review`. A `board-none` run (Gate 4, B1) is the same with no members.
+`--members default` runs the default roster into `board-default`, on any PRs. `--variant both`
+stays `code-review` and `board-full`.
 
 Repositories go to --data-dir, outside this repository, so a reviewer working in them can't read
 the golden comments. The default is $BOARD_EVAL_DATA, or ~/board-review-data.
@@ -46,10 +51,10 @@ from eval.runner import martian, qodo
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
 from eval.runner.run import (
-    BOARD_CR, PLUGIN_DIR, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
+    BOARD_CR, BOARD_NONE, PLUGIN_DIR, TWO_SESSION, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
     run_one, stale_reason,
 )
-from eval.runner.split import SEED, Split, make_draw, make_split, write_frozen
+from eval.runner.split import SEED, Split, drawn_before, make_draw, make_split, write_frozen
 
 
 def _default_data_dir() -> Path:
@@ -114,7 +119,7 @@ def _add_dataset(p: argparse.ArgumentParser) -> None:
 
 def _add_selection(p: argparse.ArgumentParser) -> None:
     """Which runs: the variant, the PRs, and the repeat. Shared by `run` and `pack`."""
-    p.add_argument("--variant", choices=[*VARIANTS, BOARD_CR, "both"], required=True)
+    p.add_argument("--variant", choices=[*VARIANTS, *TWO_SESSION, "both"], required=True)
     p.add_argument("--repeat", type=int, required=True)
     which = p.add_mutually_exclusive_group(required=True)
     which.add_argument("--prs", help="comma-separated PR ids")
@@ -188,9 +193,15 @@ def _split(args: argparse.Namespace) -> int:
 def _draw(args: argparse.Namespace) -> int:
     prs = read_jsonl(args.dataset_dir / "prs.jsonl", PullRequest)
     split = Split.model_validate_json((args.dataset_dir / "split.json").read_text(encoding="utf-8"))
-    result = make_draw(prs, getattr(split, args.source), seed=args.seed, per_repo=args.per_repo, source=args.source)
     path = args.dataset_dir / f"{args.name}.json"
+    if path.exists():
+        raise FileExistsError(f"{path} exists; it is frozen")
+    earlier = drawn_before(args.dataset_dir)
+    result = make_draw(
+        prs, getattr(split, args.source), seed=args.seed, per_repo=args.per_repo, source=args.source, exclude=earlier
+    )
     write_frozen(path, result)
+    print(f"left out {len(earlier)} PRs of earlier draws")
     print(f"seed {result.seed}: {len(result.prs)} of the {args.source} PRs -> {path}")
     print(", ".join(result.prs))
     return 0
@@ -198,17 +209,18 @@ def _draw(args: argparse.Namespace) -> int:
 
 def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     variants = VARIANTS if args.variant == "both" else (args.variant,)
-    if args.variant == BOARD_CR and args.members != "full":
-        raise SystemExit("board-cr runs the full board; --members must be full")
-    single_member = args.members != "full" and not args.smoke_repo
+    if args.variant in TWO_SESSION and args.members != "full":
+        raise SystemExit(f"{args.variant} sets its own roster; leave out --members")
+    members = "none" if args.variant == BOARD_NONE else args.members
+    single_member = members not in ("full", "default", "none") and not args.smoke_repo
     if single_member:
-        if "," in args.members:
+        if "," in members:
             raise SystemExit("one member at a time on benchmark PRs; several ids are for --smoke-repo")
         known = sorted(p.stem for p in (PLUGIN_DIR / "skills" / "review" / "members").glob("*.md"))
-        if args.members not in known:
-            raise SystemExit(f"unknown member {args.members!r}; valid ids: {', '.join(known)}")
-    if args.members != "full":
-        variants = tuple(f"board-{args.members.replace(',', '+')}" if v == "board-full" else v for v in variants)
+        if members not in known:
+            raise SystemExit(f"unknown member {members!r}; valid ids: {', '.join(known)}")
+    if members != "full":
+        variants = tuple(f"board-{members.replace(',', '+')}" if v == "board-full" else v for v in variants)
     if args.smoke_repo:
         if not (args.base and args.head):
             raise SystemExit("--smoke-repo needs --base and --head")
@@ -235,7 +247,7 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     return [
         RunSpec(
             dataset=d, pr_id=i, variant=v, repeat=args.repeat, repo=repo, base=base, head=head,
-            members=args.members, intent=intent,
+            members=members, intent=intent,
         )
         for d, i, repo, base, head, intent in targets
         for v in variants
@@ -271,7 +283,7 @@ def _run(args: argparse.Namespace) -> int:
             print(f"{run_name(spec)} ({state}) in {spec.repo}")
             intent_file = Path("<intent-file>") if spec.intent and spec.variant.startswith("board-") else None
             extra_file = None
-            if spec.variant == BOARD_CR:
+            if spec.variant in TWO_SESSION:
                 review = spec.model_copy(update={"variant": "code-review"})
                 print("  " + " ".join(command_for(review, paths.claude)[1:]))
                 extra_file = Path("<extra-findings-file>")
