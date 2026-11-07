@@ -5,7 +5,7 @@ Stratified by repo: each repo's runnable PRs are shuffled with a recorded seed, 
 `pilot_per_repo` development PRs of each repo, so it is fixed before any run too.
 
 A later gate draws its PRs from one part of the split the same way (`make_draw`, PLAN Phase 3,
-Gate 3), into its own file, also written once.
+Gate 3), into its own file, also written once, leaving out the PRs of every earlier draw.
 """
 
 from __future__ import annotations
@@ -64,12 +64,28 @@ class Draw(BaseModel):
     prs: list[str]
 
 
-def make_draw(prs: list[PullRequest], ids: list[str], seed: int, per_repo: int, source: str) -> Draw:
-    """`per_repo` of `ids` from each repo: each repo's sorted ids shuffled with `seed`, as in the split."""
+def drawn_before(dataset_dir: Path) -> set[str]:
+    """Every PR in a draw already written to the dataset folder: a gate never reuses another's PRs."""
+    drawn: set[str] = set()
+    for path in sorted(dataset_dir.glob("*.json")):
+        if path.name != "split.json":
+            drawn |= set(Draw.model_validate_json(path.read_text(encoding="utf-8")).prs)
+    return drawn
+
+
+def make_draw(
+    prs: list[PullRequest], ids: list[str], seed: int, per_repo: int, source: str, exclude: set[str] = frozenset()
+) -> Draw:
+    """`per_repo` of `ids` from each repo: each repo's sorted ids shuffled with `seed`, as in the split.
+
+    `exclude` leaves PRs out after grouping, so a repo it empties still has to supply `per_repo`.
+    """
     repo_of = {pr.id: pr.repo for pr in prs}
     by_repo: dict[str, list[str]] = {}
     for pr_id in ids:
-        by_repo.setdefault(repo_of[pr_id], []).append(pr_id)
+        pool = by_repo.setdefault(repo_of[pr_id], [])
+        if pr_id not in exclude:
+            pool.append(pr_id)
 
     rng = random.Random(seed)
     drawn = []
