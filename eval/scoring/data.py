@@ -110,22 +110,31 @@ class Run:
         return f"{self.variant}/{self.pr_id}/r{self.repeat}"
 
 
+# Pseudo-variant -> two-session variant: the `/code-review` session inside each of its runs
+# (`<run>/code-review/`), judged alone as a `/code-review` run. `code-review-b1` is the reference
+# for Gate 4's recall floor (PLAN Phase 3, Gate 4, rule 2).
+NESTED_REVIEWS = {"code-review-b1": "board-none"}
+
+
 def iter_runs(dataset: str, variants: list[str], pr_ids: list[str]) -> list[Run]:
-    """Finished runs (meta status ok) for the given variants and PRs."""
+    """Finished runs (meta status ok) for the given variants and PRs. A nested review counts only
+    when both its own session and its parent run finished."""
     runs = []
     for variant in variants:
+        parent = NESTED_REVIEWS.get(variant)
         for pid in pr_ids:
-            pr_dir = RESULTS / dataset / variant / pid
+            pr_dir = RESULTS / dataset / (parent or variant) / pid
             if not pr_dir.is_dir():
                 continue
             for rdir in sorted(pr_dir.glob("r*")):
-                meta_file = rdir / "meta.json"
-                if not meta_file.exists():
+                metas = [rdir / "meta.json"] + ([rdir / "code-review" / "meta.json"] if parent else [])
+                if not all(m.exists() for m in metas):
                     continue
-                meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                if meta.get("status") != "ok":
+                loaded = [json.loads(m.read_text(encoding="utf-8")) for m in metas]
+                if any(m.get("status") != "ok" for m in loaded):
                     continue
-                runs.append(Run(dataset, variant, pid, int(rdir.name[1:]), rdir, meta))
+                path = rdir / "code-review" if parent else rdir
+                runs.append(Run(dataset, variant, pid, int(rdir.name[1:]), path, loaded[-1]))
     return runs
 
 
@@ -236,7 +245,7 @@ def review_findings(run: Run) -> list[dict] | None:
     `summary`. Evidence, failure scenarios, and fixes are left out for both, so neither
     variant's longer explanations get extracted into extra issues.
     """
-    if run.variant == "code-review":
+    if not run.variant.startswith("board-"):  # `code-review`, or a nested review (NESTED_REVIEWS)
         found = code_review_found(run.path)
         if found is None:
             return None

@@ -31,6 +31,8 @@ uv run pytest
   It also gives finding precision per label, the wrongful-refutation rate, and the golden comments that adjudication lost (PLAN Phase 4).
 - **`subsets`** scores every subset of members and applies the selection rule of PLAN Phase 4.
 - **`gate2`** applies Gate 2 as pre-registered on 2026-11-04 (PLAN Phase 3): full-board recall (`board:full:cp`) above `/code-review`'s, with 2 repeats per PR for both. It prints PASS, FAIL, or NOT DECIDED, with precision, F1, the paired-bootstrap CIs, and the grouping loss.
+- **`merge`** and **`gate3`** apply Gate 3 (PLAN Phase 3): `merge --pairs 1,2 3,4` merges two judged `/code-review` runs into one `code-review-x2` record; `gate3` compares A2 (`board-cr:full:cp:issues`) with A1 (`code-review-x2`) on recall, with one run's F1 as the guardrail.
+- **`gate4`** applies Gate 4 (PLAN Phase 3): false positives per PR, B2 (`board-default:full:cp:issues`) minus B1 (`board-none:full:confirmed:issues`), decide with a paired bootstrap; B2's recall must be at least 90% of the recall of B1's own `/code-review` sessions judged alone (`code-review-b1:issues`). Judge with `--variants board-none,board-default,code-review-b1` first. It prints BOARD WINS, CHECKING IS ENOUGH, NO DECISION, or NOT DECIDED (too few repeats).
 - **`gate1`** (J3) runs Martian's full pipeline on the stored `claude-code` reviews with a published judge (`--judge openrouter:anthropic/claude-sonnet-4.5`) and compares each golden comment's verdict with Martian's published ones (PLAN Phase 3). Judges named `openrouter:<model id>` use `OPENROUTER_API_KEY` from `.env`.
 - **`gate1b`** (J3) re-judges the stored reviews of 7 published tools with a local judge, compares its tool ranking with Martian's published judges, then asks 200 cached prompts again as a repeat check (PLAN Phase 3). Needs `--martian-dir`, the pinned Martian clone's `offline/` folder.
 
@@ -44,6 +46,9 @@ uv run pytest
 | `board:edge,intent:confirmed` | any list of members; CONFIRMED only |
 | `board:full:raw` | every finding, before adjudication |
 | `board:full:cp:ungrouped` | a diagnostic: every finding counts, not one per board group. The difference to `board:full:cp` is the grouping loss |
+| `...:issues` | per issue: every finding in the view is kept, and each Martian dedup group counts once (Gates 3 and 4) |
+| `board-cr:...`, `board-none:...`, `board-default:...` | the same over Gate 3's A2 and Gate 4's B1 and B2 runs; `full` is every member present |
+| `code-review-b1` | the `/code-review` session inside each `board-none` run, judged as a `/code-review` run |
 | `code-review@whole`, `board-full@whole` | the check described in the method, step 2 |
 
 ### Test PRs

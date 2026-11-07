@@ -7,6 +7,8 @@
     uv run python -m eval.scoring gate2   --dataset martian --judge deepseek-flash --split dev
     uv run python -m eval.scoring gate3   --dataset qodo --judge deepseek-flash --split test --release "Gate 3"
     uv run python -m eval.scoring merge   --dataset qodo --judge deepseek-flash --split dev --pairs 1,2
+    uv run python -m eval.scoring judge   --dataset qodo --judge deepseek-flash --split test --release "Gate 4" \n        --variants board-none,board-default,code-review-b1
+    uv run python -m eval.scoring gate4   --dataset qodo --judge deepseek-flash --split test --release "Gate 4"
 
 See eval/scoring/README.md.
 """
@@ -407,9 +409,72 @@ def cmd_gate3(args) -> None:
     print(f"\n**Gate 3: {verdict}**")
 
 
+GATE4_VIEWS = {"B2": "board-default:full:cp:issues", "B1": "board-none:full:confirmed:issues",
+               "floor ref": "code-review-b1:issues"}
+GATE4_REPORTED = {"B1, CONFIRMED + PLAUSIBLE": "board-none:full:cp:issues",
+                  "B2, CONFIRMED only": "board-default:full:confirmed:issues"}
+GATE4_FLOOR = 0.9  # B2's recall must be at least 90% of the floor reference's (point estimates)
+
+
+def gate4_verdict(ci: tuple[float, float], floor_met: bool) -> str:
+    """PLAN Phase 3, Gate 4 rule: false positives per PR, B2 − B1, decides; the recall floor guards."""
+    lo, hi = ci
+    if hi < 0 and floor_met:
+        return "BOARD WINS (fewer false positives per PR, recall floor met)"
+    if lo > 0:
+        return "CHECKING IS ENOUGH (the checked `/code-review` has fewer false positives per PR)"
+    return "NO DECISION (" + ("the recall floor fails" if hi < 0 else "the false-positive CI spans 0") + ")"
+
+
+def cmd_gate4(args) -> None:
+    """PLAN Phase 3, Gate 4: the default board (B2) against `/code-review` checked by the board's
+    verifier (B1), both counted per issue. False positives per PR decide; B2's recall must be at
+    least 90% of the recall of B1's own `/code-review` sessions, judged alone before the check."""
+    ids = pr_ids(args)
+    views = {**GATE4_VIEWS, **GATE4_REPORTED}
+    res = {k: _results(args, parse_view(v), ids) for k, v in views.items()}
+    both = sorted(set.intersection(*({pid for pid, _ in res[k]} for k in GATE4_VIEWS)))
+    units = {k: {p: u for p, u in per_pr(r, args.profile).items() if p in both} for k, r in res.items()}
+    print(f"\n## Gate 4: {args.dataset}, split {args.split}, judge {args.judge}, profile {args.profile}\n")
+    print("| Variant | View | PRs | Runs | Precision | Recall | F1 | FP per PR |")
+    print("|---|---|---|---|---|---|---|---|")
+    for k, v in views.items():
+        s = summarize(units[k], both) if both else summarize({})
+        runs = sum(1 for pid, _ in res[k] if pid in both)
+        print(f"| {k} | {v} | {s['prs']} | {runs} | {s['precision']:.1%} | {s['recall']:.1%} | {s['f1']:.1%} "
+              f"| {s['fp_per_pr']:.2f} |")
+    short = [f"{k} {pid}" for k in GATE4_VIEWS for pid in both
+             if sum(1 for p, _ in res[k] if p == pid) < GATE2_REPEATS]
+    if not both or short:
+        print("\nNOT DECIDED: the rule needs 2 repeats per PR for B1, B2 and B1's `/code-review` sessions; short: "
+              + (", ".join(short) or "no PRs"))
+        return
+    fp = bootstrap(units["B2"], units["B1"], "fp_per_pr", n=args.bootstrap)
+    rows = [("ΔFP per PR (decides)", fp, ".2f"),
+            ("ΔRecall", bootstrap(units["B2"], units["B1"], "recall", n=args.bootstrap), ".1%"),
+            ("ΔPrecision", bootstrap(units["B2"], units["B1"], "precision", n=args.bootstrap), ".1%")]
+    print("\n| Paired bootstrap, B2 − B1 | Point | 95% CI | p |")
+    print("|---|---|---|---|")
+    for label, b, f in rows:
+        pv = "n/a" if b.get("p_two_sided") is None else format(b["p_two_sided"], ".3f")
+        print(f"| {label} | {b['point']:+{f}} | {b['ci95'][0]:+{f}} to {b['ci95'][1]:+{f}} | {pv} |")
+    r2, ref = summarize(units["B2"])["recall"], summarize(units["floor ref"])["recall"]
+    floor_met = r2 >= GATE4_FLOOR * ref
+    print(f"\nRecall floor: B2 {r2:.1%} {'≥' if floor_met else '<'} 90% of B1's `/code-review` sessions' "
+          f"{ref:.1%} ({GATE4_FLOOR * ref:.1%}).")
+    print(f"\n**Gate 4: {gate4_verdict(fp['ci95'], floor_met)}**")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
+    g4 = sub.add_parser("gate4", help="default board vs /code-review checked by the verifier (PLAN Phase 3, Gate 4)")
+    g4.add_argument("--dataset", required=True)
+    g4.add_argument("--judge", required=True)
+    g4.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    g4.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+    g4.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    g4.add_argument("--bootstrap", type=int, default=2000, help="bootstrap resamples")
     for name in ("judge", "report", "members", "subsets"):
         s = sub.add_parser(name)
         s.add_argument("--dataset", required=True)
@@ -490,7 +555,7 @@ def main() -> None:
         cmd_gate1(args)
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
-         "gate3": cmd_gate3}[args.cmd](args)
+         "gate3": cmd_gate3, "gate4": cmd_gate4}[args.cmd](args)
 
 
 if __name__ == "__main__":
