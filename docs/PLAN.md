@@ -217,7 +217,25 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
     - **Ten A1 runs that hit the usage limit** were recorded as `ok` with only the limit notice as their reply; they were rerun before packing, and the runner now catches that notice (#41).
   - **Result (2026-11-07): NO DECISION** (`eval/reports/gate3-qodo-deepseek-flash.md`). Core recall: A2 71.2%, A1 73.3%, ΔRecall −2.1 points (95% CI −7.6 to +3.8). Precision 34.0% against 30.9% (+3.1, CI −0.1 to +6.9), F1 46.0% against 43.5% (+2.5, CI −1.2 to +6.7). The guardrail fails too: A2's F1 is below one `/code-review` run's 46.6%. A2 costs about 9 times A1.
     - Reported: A2 with CONFIRMED findings only reaches 45.7% precision and 58.2% recall (ΔF1 +7.8 against A1, CI +1.4 to +13.6); the default board from Gate 2 reaches 71.9% and 56.2% on these PRs. A2's own `/code-review` sessions found 4.5 recall points less than A1's (CI −8.5 to −0.4) under the same settings, a weak draw found after the result.
-    - **Next step:** decided by both collaborators from the report.
+    - **Next step:** decided by both collaborators from the report. Proposal: Gate 4, below.
+- **Gate 4, the board as a precision tool (proposal, 2026-11-07).** Drafted by Yara after the Gate 3 report; to be agreed by both collaborators before any Gate 4 run or PR draw.
+  - **Why.** Three gates asked whether the board finds more than `/code-review`, and none said yes: Gate 2 on Martian (recall 67.4% vs 70.9%), Gate 2 on Qodo (69.4% vs 77.1%), Gate 3 against `/code-review` ×2 (71.2% vs 73.3%, NO DECISION). What the same runs show every time is precision: on the Gate 3 PRs the default board reaches 71.9% precision at 56.2% recall, about 0.7 false positives per PR, against 5.0 for `/code-review` ×2 and about 2.6 for one run. If the findings feed an agent that edits code, every false positive is a wrong edit to catch. That is the claim worth testing, and no gate has tested it.
+  - **Variants.**
+    - **B1, `/code-review` checked:** one `/code-review` run, then a second `claude -p` session given its findings and the repository, asked to keep only the findings it can confirm from the code (a verifier pass without a board). This is the cheap competitor: if a checking step alone reaches the board's precision, the members aren't needed. Needs a runner variant, `code-review-checked` (TASKS Y11), and a checker prompt fixed before any run; `board-verifier.md` is the natural source.
+    - **B2, the default board**, run for real with `--members default` (intent, edge, saboteur, intern), findings labeled CONFIRMED or PLAUSIBLE. So far the default board exists only offline, re-scored from full runs with the full board's labels (section 5, "Offline variant b keeps c's labels"); a real run has smaller groups and fewer co-findings, so its precision may differ. Gate 4 is also the first measurement of that gap.
+    - Reported, not deciding: one `/code-review` run, A1 (`/code-review` ×2), and B2 with CONFIRMED only.
+  - **PRs.** 24 PRs no gate has scored: 3 per repository from the 52 remaining Qodo test PRs, seed 20261108, drawn with `draw --name gate4` and logged as a release use. The 30 Martian test PRs stay untouched; one dataset keeps the budget at Gate 3's size.
+  - **Repeats.** 2 per PR and variant: 48 B1 runs (96 sessions) and 48 B2 runs.
+  - **Rule.** Core profile, judged by `deepseek-flash`. Two numbers, both pre-registered:
+    1. **False positives per PR** decides: B2 − B1, paired bootstrap over PRs (95% CI). The board wins only if the CI is below 0.
+    2. **Recall floor** as the guardrail: B2's recall must be at least B1's minus 5 points (point estimate). A board that halves the false positives by dropping a quarter of the real bugs hasn't won.
+    - CI below 0 and the floor met: **the board earns its place as the precise reviewer**; Phase 4 selects its roster on the development PRs as planned, with false positives per PR as the selection metric instead of F1.
+    - CI above 0: **a checking step is enough**; stop, with the written analysis.
+    - Otherwise: no decision; both collaborators decide. A third gate with no decision ends the project.
+  - **Why these rules.** F1 was the wrong metric for a precision claim: it treats a missed bug and a wrong report as equal, and a second `/code-review` run can always buy recall with false positives. False positives per PR is what the fixing agent pays for; the recall floor keeps the comparison honest.
+  - **Judge.** `deepseek-flash` on account A, as before, with the same 60-pair blind check by Jim.
+  - **Cost.** B2 at the default roster: four members and their verifiers, about $0.40–0.50 per run (the full board is $1.04). B1 about $0.12. About $30 for 96 runs, plus Y11 smoke tests, on account B.
+  - **No tuning** of any brief, the checker prompt, or the rule between agreement and the result.
 
 ### Phase 4: full runs, select the default board
 
