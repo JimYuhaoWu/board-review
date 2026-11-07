@@ -47,6 +47,7 @@ def summarize(units: dict[str, Counts], prs: list[str] | None = None) -> dict:
         "recall": recall,
         "f1": _fbeta(precision, recall, 1.0),
         "f2": _fbeta(precision, recall, 2.0),
+        "fp_per_pr": fp / len(prs) if prs else 0.0,  # Gate 4 decides on it
     }
 
 
