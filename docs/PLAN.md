@@ -1,6 +1,6 @@
 # Board Review: design and evaluation plan
 
-Status: **approved, not started**. Phase 0 (setup) is next.
+Status: **closed 2026-11-08 after Gate 4** (NO DECISION, the recall floor fails; report `eval/reports/gate4-qodo-deepseek-flash.md`). The board project stops under the Gate 4 stop policy. New work follows [PLAN-v2.md](PLAN-v2.md); this plan's sections 5.1, 6, 7 and 9 still apply there.
 
 ## 1. Goal
 
@@ -235,6 +235,7 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
     - CI below 0 and the floor met: **the board earns its place as the precise reviewer**; Phase 4 selects its roster on the development PRs with the same two numbers: among rosters whose recall is at least 90% of `/code-review`'s on those PRs (from the existing `/code-review` runs), the fewest false positives per PR, then the smallest roster within one bootstrap standard error of it. False positives per PR alone would pick the smallest roster: an empty review scores 0.
     - CI above 0: **a checking step is enough**; stop, with the written analysis.
     - Otherwise: no decision.
+  - **Result (2026-11-08): NO DECISION (the recall floor fails).** False positives per PR, B2 − B1: −0.42 (95% CI −0.77 to −0.10); B2's recall 63.2%, below the floor of 65.7% (90% of 73.0%). Jim's judge check was not done: he closed the gate without it. The project stops; see [PLAN-v2.md](PLAN-v2.md).
   - **Stop policy, agreed explicitly by both collaborators with this entry:** if Gate 4 ends with no decision, the project stops with the written analysis, as it does when the checking step wins. No Gate 5.
   - **Why these rules.** F1 was the wrong metric for a precision claim: it treats a missed bug and a wrong report as equal, and a second `/code-review` run can always buy recall with false positives. False positives per PR is what the fixing agent pays for; the recall floor keeps the comparison honest.
   - **Judge.** `deepseek-flash` on account A, as before, with the same 60-pair blind check by Jim.
