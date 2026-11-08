@@ -17,3 +17,7 @@
 | 2026-11-07 22:09 | qodo | test | gate3 | Gate 3 report: All profile |
 | 2026-11-07 22:10 | qodo | test | report | Gate 3 report: default board FP |
 | 2026-11-07 22:45 | qodo | test | power check (scratch) | Gate 4 power check (offline, Gate 3 runs) |
+| 2026-11-08 09:19 | qodo | test | judge | Gate 4 |
+| 2026-11-08 09:44 | qodo | test | judge | Gate 4 |
+| 2026-11-08 19:58 | qodo | test | gate4 | Gate 4 |
+| 2026-11-08 22:10 | qodo | test | preview (scratch) | PLAN v2 Phase A: re-scored Gate 3 and Gate 4 /code-review runs, new pairwise dedups |
