@@ -16,3 +16,4 @@
 | 2026-11-07 21:38 | qodo | test | judge nested /code-review sessions (scratch, diagnostic) | Gate 3 follow-up: code-review member vs native |
 | 2026-11-07 22:09 | qodo | test | gate3 | Gate 3 report: All profile |
 | 2026-11-07 22:10 | qodo | test | report | Gate 3 report: default board FP |
+| 2026-11-07 22:45 | qodo | test | power check (scratch) | Gate 4 power check (offline, Gate 3 runs) |

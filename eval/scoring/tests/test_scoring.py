@@ -586,3 +586,75 @@ def test_board_cr_views():
     assert parse_view("board:full:cp").variant == "board-full"
     with pytest.raises(ValueError):
         parse_view("board-x:full:cp")
+
+
+def test_gate4_views():
+    b1, b2 = parse_view("board-none:full:confirmed:issues"), parse_view("board-default:full:cp:issues")
+    assert b1.variant == "board-none" and b1.labels == frozenset({"CONFIRMED"}) and b1.per_issue and b1.members is None
+    assert b2.variant == "board-default" and b2.labels == frozenset({"CONFIRMED", "PLAUSIBLE"}) and b2.per_issue
+    ref = parse_view("code-review-b1:issues")
+    assert ref.variant == "code-review-b1" and ref.per_issue and ref.labels is None
+
+
+def test_nested_reviews_need_both_sessions_ok(tmp_path, monkeypatch):
+    """Gate 4's floor reference: the `/code-review` session inside each finished `board-none` run."""
+    from eval.scoring import data
+
+    monkeypatch.setattr(data, "RESULTS", tmp_path)
+    for rep, parent, nested in ((1, "ok", "ok"), (2, "failed:usage-limit", "ok"), (3, "ok", "failed:code-review")):
+        run = tmp_path / "d" / "board-none" / "p1" / f"r{rep}"
+        (run / "code-review").mkdir(parents=True)
+        (run / "meta.json").write_text(json.dumps({"status": parent}), encoding="utf-8")
+        (run / "code-review" / "meta.json").write_text(json.dumps({"status": nested, "repeat": rep}), encoding="utf-8")
+        (run / "code-review" / "final.md").write_text(
+            "1. `a.py:7`: Off by one in the loop.\n\n   Failure scenario: the last row is skipped.\n", encoding="utf-8")
+    runs = data.iter_runs("d", ["code-review-b1"], ["p1"])
+    assert [(r.variant, r.repeat, r.path.name, r.meta["repeat"]) for r in runs] == [("code-review-b1", 1, "code-review", 1)]
+    found = data.review_findings(runs[0])
+    assert [f["file"] for f in found] == ["a.py"] and found[0]["member"] is None  # read as `/code-review`, not board JSON
+
+
+def test_fp_per_pr():
+    units = {"p1": (1.0, 2.0, 0.0), "p2": (0.0, 1.0, 1.0)}
+    assert summarize(units)["fp_per_pr"] == 1.5
+    assert summarize(units, ["p1", "p1"])["fp_per_pr"] == 2.0  # a bootstrap sample repeats PRs
+
+
+def test_gate4_verdict():
+    from eval.scoring.__main__ import gate4_verdict
+
+    assert gate4_verdict((-0.8, -0.2), True).startswith("BOARD WINS")
+    assert gate4_verdict((-0.8, -0.2), False) == "NO DECISION (the recall floor fails)"
+    assert gate4_verdict((0.1, 0.5), True).startswith("CHECKING IS ENOUGH")
+    assert gate4_verdict((0.1, 0.5), False).startswith("CHECKING IS ENOUGH")
+    assert gate4_verdict((-0.3, 0.2), True) == "NO DECISION (the false-positive CI spans 0)"
+
+
+def _gate4_results(fp_b1, fp_b2, tp_b2, repeats=2, prs=6):
+    """{view spec: _results} with every PR having 3 golden bugs."""
+    def res(fp, tp):
+        return {"true_positives": [{"category": "bug"}] * tp, "false_negatives": [{"category": "bug"}] * (3 - tp),
+                "fp": fp}
+    per = {"board-default:full:cp:issues": (fp_b2, tp_b2), "board-none:full:confirmed:issues": (fp_b1, 2),
+           "code-review-b1:issues": (4, 3), "board-none:full:cp:issues": (fp_b1 + 1, 2),
+           "board-default:full:confirmed:issues": (fp_b2, tp_b2)}
+    return {spec: {(f"p{i}", r): res(fp + (i % 2), tp) for i in range(prs) for r in range(1, repeats + 1)}
+            for spec, (fp, tp) in per.items()}
+
+
+@pytest.mark.parametrize("fp_b1, fp_b2, tp_b2, repeats, expect", [
+    (3, 0, 3, 2, "Gate 4: BOARD WINS"),
+    (3, 0, 2, 2, "Gate 4: NO DECISION (the recall floor fails)"),  # 2/3 recall < 90% of 3/3
+    (0, 3, 3, 2, "Gate 4: CHECKING IS ENOUGH"),
+    (3, 0, 3, 1, "NOT DECIDED"),
+])
+def test_gate4_end_to_end(monkeypatch, capsys, fp_b1, fp_b2, tp_b2, repeats, expect):
+    import argparse
+    from eval.scoring import __main__ as cli
+
+    table = _gate4_results(fp_b1, fp_b2, tp_b2, repeats)
+    monkeypatch.setattr(cli, "_results", lambda args, view, ids: table[view.name])
+    monkeypatch.setattr(cli, "pr_ids", lambda args: [f"p{i}" for i in range(6)])
+    cli.cmd_gate4(argparse.Namespace(dataset="d", judge="j", split="test", profile="core", bootstrap=200))
+    out = capsys.readouterr().out
+    assert expect in out
