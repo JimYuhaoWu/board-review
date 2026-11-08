@@ -658,3 +658,18 @@ def test_gate4_end_to_end(monkeypatch, capsys, fp_b1, fp_b2, tp_b2, repeats, exp
     cli.cmd_gate4(argparse.Namespace(dataset="d", judge="j", split="test", profile="core", bootstrap=200))
     out = capsys.readouterr().out
     assert expect in out
+
+
+def test_board_findings_undoes_gate4_format_slips():
+    from eval.scoring.data import board_findings
+
+    f1 = {"id": "edge-1", "member": "edge", "label": "CONFIRMED", "claim": "a"}
+    f2 = {"id": "intent-2", "label": "PLAUSIBLE", "claim": "b"}
+    normal = {"findings": [{**f1, "group": "G1"}, {**f2, "member": "intent", "group": "G2"}]}
+    assert board_findings(normal) == normal["findings"]
+    nested = {"groups": [{"id": "G1", "label": "CONFIRMED", "findings": [f1]},
+                         {"id": "G2", "label": "PLAUSIBLE", "findings": [{"id": "intent-2", "member": "intent", "claim": "b"}]}]}
+    assert board_findings(nested) == normal["findings"]  # group from its group; a missing label from the group's
+    no_member = {"findings": [{**f2, "group": "G2"}]}
+    assert board_findings(no_member)[0]["member"] == "intent"
+    assert board_findings({"findings": [{"id": "test-auditor-3", "claim": "c"}]})[0]["member"] == "test-auditor"

@@ -258,8 +258,21 @@ def review_findings(run: Run) -> list[dict] | None:
     return [
         {"id": f["id"], "member": f["member"], "label": f.get("label"), "group": f.get("group"),
          "file": f.get("file"), "line": f.get("line"), "text": f["claim"]}
-        for f in board["findings"]
+        for f in board_findings(board)
     ]
+
+
+def board_findings(board: dict) -> list[dict]:
+    """The board's findings, with two orchestrator format slips undone (Gate 4, decided 2026-11-08,
+    before scoring): findings nested in their `groups` instead of a top-level `findings` list
+    (B2 `dify-5` r2, `firefox_ios-6` r2), and findings without `member`, which their id gives as
+    `<member>-<n>` (B2 `firefox_ios-5` r1). Every other field the scorer reads is present in both."""
+    if "findings" in board:
+        found = board["findings"]
+    else:
+        found = [{**f, "group": f.get("group", g["id"]), "label": f.get("label", g.get("label"))}
+                 for g in board.get("groups", []) for f in g.get("findings", [])]
+    return [f if "member" in f else {**f, "member": f["id"].rsplit("-", 1)[0]} for f in found]
 
 
 def representatives(findings: list[dict]) -> list[dict]:
