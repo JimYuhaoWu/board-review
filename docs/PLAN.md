@@ -240,6 +240,10 @@ Develop against 1–2 small benchmark PRs only. Full runs start in Phase 3.
   - **Judge.** `deepseek-flash` on account A, as before, with the same 60-pair blind check by Jim.
   - **Cost.** Estimated, not measured: B2 about $0.40–0.50 per run (four members and their verifiers; the full board is $1.04), B1 about $0.20–0.30 (`/code-review` plus the board's orchestrator and verifiers on about 6 findings). About $35 for 96 runs, on account B. Y11's smoke test measures both before the budget is agreed.
   - **No tuning** of any brief, the skill beyond `--members none`, or the rule between agreement and the result.
+  - **Orchestrator format slips in the runs (decided 2026-11-08, before scoring).** All 96 runs finished `ok`; four B2 runs and no B1 run had a malformed final report.
+    - **B2 `cal_com-8` r1 was rerun.** It ended in a markdown report instead of the JSON, so it had no ids, labels or groups to score, as with Y9's `dify-7`. The rerun is the one scored; the failed attempt is kept under `eval/results/superseded/`.
+    - **Three B2 runs are normalized in scoring, not rerun.** Their JSON has every field the scorer reads, in a different place: `dify-5` r2 and `firefox_ios-6` r2 nest their findings in `groups`, and `firefox_ios-5` r1 leaves out `member`, which each finding's id gives. `board_findings` flattens the groups and takes the member from the id. A rerun would replace three of B2's draws, chosen by output shape, with new ones.
+    - The Gate 4 report gives the slip rate (4 of 48 B2 runs, 0 of 48 B1) as a cost of B2: a user would have got a malformed report.
 
 ### Phase 4: full runs, select the default board
 
