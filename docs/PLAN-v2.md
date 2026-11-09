@@ -23,6 +23,7 @@ v1's design principle "specialist members, no voting" (PLAN 2) is what the data 
 1. Run native `/code-review` **n times**, independently, at the user's mode and settings.
 2. A **matching step** groups findings that describe the same issue. It is one model call, part of the add-on, and its errors count against the add-on.
 3. Keep an issue found by **at least m of the n runs**: an intersection of the runs when m = n, otherwise the union of the intersections of every m runs.
+4. **Report** each kept issue with all its findings from the agreeing runs, grouped. Phases B and C score this output, per issue: a kept issue counts as found when any of its findings matches a golden issue, as in Phase A. Reporting one wording per issue would score lower (Phase A caveats).
 
 There is **no verifier** (question 2). Question 1 chooses n and m; question 3 tests the result in every mode.
 
@@ -30,7 +31,7 @@ There is **no verifier** (question 2). Question 1 chooses n and m; question 3 te
 
 1. **How many repeats?** Which (m, n) gives the fewest false positives per PR while keeping recall, and is the step from 2 to 3 runs worth its cost?
 2. **What should the verifier do?** **Closed (Jim, 2026-11-09): the verifier is abandoned, replaced by intersections of `/code-review` runs.** In Phase A it cost as much as 4–5 runs; the roles that kept recall removed few false positives, and the role that removed many lost recall below a 90% floor. It was not tuned, and this was not a head-to-head test: the decision rests on cost and on keeping the add-on simple.
-3. **Does the add-on improve the original in every mode?** The modes are `/code-review`'s effort levels `low`, `medium`, `high`, `xhigh` and `max`. **Ultra is out of scope**: it runs in the cloud and needs a human to launch it, which defeats the goal.
+3. **Does the add-on improve the original in every mode?** The modes are `/code-review`'s effort levels `low`, `medium`, `high`, `xhigh` and `max`: the level argument (`/code-review high`). The session's own `--effort` stays at `medium` (v1 5.1), so a mode changes one setting only. **Ultra is out of scope**: it runs in the cloud and needs a human to launch it, which defeats the goal.
 
 ## 5. Phases
 
@@ -61,17 +62,18 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 
 - **PRs:** the 24 Qodo and 15 Martian development PRs (the pilot PRs are among them). No test PR.
 - **Runs:** native `/code-review medium --max-findings all` (v1 5.1 settings), **k = 5** independent runs per PR, 195 in all. The 68 existing runs on these PRs have matching settings and are reused (2 per PR on 24 Qodo and 10 Martian PRs); 127 are new (3 more on those 34 PRs, 5 on the other 5 Martian PRs). Runs from Gates 3 and 4 are on test PRs and are not reused. Every subset of n ≤ 5 runs is scored, so one batch answers question 1.
-- **Matching step:** built and tuned here, on a model other than the judge (so the add-on and the scoring don't share errors). It is checked against the judge's dedup and a hand-labeled sample before question 1 is scored with it.
-- **Selection rule, fixed before any Phase B run:**
+- **Matching step:** built and tuned here, as a `claude -p` session on the review's model and settings (`claude-sonnet-5-5`, effort `medium`): what a user of the add-on would run, and a model other than the judge, so the add-on and the scoring don't share errors. It is checked against the judge's dedup and a hand-labeled sample before question 1 is scored with it. The sample's size, who labels it, and the agreement it must reach are fixed before any tuning (proposal: 100 finding pairs, labeled by Jim, at least 90% agreement); if the step falls short, question 1 is not scored with it.
+- **Selection rule, fixed before any Phase B scoring:**
   - Recall floor: at least 90% of one run's recall on the same PRs (point estimate).
-  - Among configurations that meet it, the fewest false positives per PR; then the cheapest within one bootstrap standard error of it.
+  - Among configurations that meet it, the fewest false positives per PR; then the cheapest within one bootstrap standard error of it. A configuration's cost includes its matching step, which Phase A's costs leave out.
 - **Output:** one fixed add-on (n, m, matching prompt and model), frozen before Phase C, and a figure of false positives per PR against recall for every (m, n) up to n = 5, with cost shown.
 
 ### Phase C: confirmation in every mode (question 3)
 
-- **PRs:** the 28 Qodo test PRs no gate has used, and the 30 Martian test PRs. Logged as usual (v1 6.6).
-- **Per mode** (`low`, `medium`, `high`, `xhigh`, `max`): the frozen add-on against one native run at the same mode, paired on the same runs where possible, 2 repeats.
-- **Decision per mode:** false positives per PR, add-on − native, paired bootstrap; the CI must be below 0 after a Holm correction over the 5 modes, and the add-on's recall at least 90% of the native run's (point estimate).
+- **PRs:** the 28 Qodo test PRs no gate has used (none from redis: Gates 3 and 4 used all of its test PRs), and the 30 Martian test PRs, pooled into 58 PRs as Phase B pools its two datasets; each dataset is also reported alone. Logged as usual (v1 6.6).
+- **Per mode** (`low`, `medium`, `high`, `xhigh`, `max`): n native runs per PR at that mode, with n from Phase B. The add-on is the frozen add-on over those n runs; the native baseline is each of the same runs scored alone, averaged. Fully paired, and half the runs of 2 add-on repeats.
+- **Every run passes its level and `--max-findings all` explicitly:** `/code-review` remembers the last choice in the config folder, which parallel runs share.
+- **Decision per mode:** false positives per PR, add-on − native, paired bootstrap over PRs; the CI must be below 0 after a Holm correction over the 5 modes, and the add-on's recall at least 90% of the native runs' (point estimate).
 - **Claim:** "the add-on improves `/code-review` in every mode" only if all 5 modes pass; otherwise the modes that pass are reported as such.
 - **Judge check:** Jim's 60-pair blind check is required before the result is final (v1's rule; below 85% agreement, NOT DECIDED). Gate 4 skipped it; Phase C doesn't.
 
@@ -79,10 +81,9 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 
 - One `/code-review` run at `medium` is about $0.07 (Gate 4).
 - Phase B: 127 new runs on 39 PRs ≈ $8–9. Account B; judging on account A.
-- Phase C: the cost per mode is unknown above `medium`. Yara's smoke test measures one run per mode on 2 PRs before the budget is agreed.
+- Phase C: the cost per mode is unknown above `medium`. Yara's smoke test (Y13) measures one run per mode on 2 PRs before the budget is agreed.
+- **Weekly limit.** v1 section 7 plans around the 5-hour window, but Gate 4's overnight batch (about $40) stopped at account B's weekly limit. Phase C is n × 58 × 5 runs, 870 at n = 3; at `max` that may be hundreds of dollars. Its size is set from Y13's costs against the weekly limit before any Phase C run: `max` may run on fewer PRs, or be reported without deciding.
 
 ## 7. Open
 
-- The matching step's model.
-- Martian's role in Phase C: second dataset, or a separate claim.
-- Whether `max` fits the budget.
+- Whether `max` fits the budget, after Y13.
