@@ -9,6 +9,8 @@ Rule (PLAN Phase 3, Gate 4, agreed 2026-11-07 before any Gate 4 run or PR draw; 
 
 **Result: NO DECISION (the recall floor fails).** B2 has fewer false positives per PR than B1, but its recall is below the floor. Under the stop policy agreed with Gate 4, the board project stops here; there is no Gate 5.
 
+![Gate 4 result](gate4-plot.png)
+
 ## Core profile (functional bugs, 76 golden issues)
 
 | Variant | View | Runs | Precision | Recall | FP per PR |
