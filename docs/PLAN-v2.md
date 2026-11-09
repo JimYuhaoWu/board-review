@@ -62,7 +62,13 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 
 - **PRs:** the 24 Qodo and 15 Martian development PRs (the pilot PRs are among them). No test PR.
 - **Runs:** native `/code-review medium --max-findings all` (v1 5.1 settings), **k = 5** independent runs per PR, 195 in all. The 68 existing runs on these PRs have matching settings and are reused (2 per PR on 24 Qodo and 10 Martian PRs); 127 are new (3 more on those 34 PRs, 5 on the other 5 Martian PRs). Runs from Gates 3 and 4 are on test PRs and are not reused. Every subset of n ≤ 5 runs is scored, so one batch answers question 1.
-- **Matching step:** built and tuned here, as a `claude -p` session on the review's model and settings (`claude-sonnet-5-5`, effort `medium`): what a user of the add-on would run, and a model other than the judge, so the add-on and the scoring don't share errors. It is checked against the judge's dedup and a hand-labeled sample before question 1 is scored with it. The sample's size, who labels it, and the agreement it must reach are fixed before any tuning (proposal: 100 finding pairs, labeled by Jim, at least 90% agreement); if the step falls short, question 1 is not scored with it.
+- **Matching step:** built and tuned here, as a `claude -p` session on the review's model and settings (`claude-sonnet-5-5`, effort `medium`): what a user of the add-on would run, and a model other than the judge, so the add-on and the scoring don't share errors. It is checked against the judge's dedup and a model panel before question 1 is scored with it; if it falls short, question 1 is not scored with it.
+- **Matching check, no human labels (Jim, 2026-11-09), fixed before any tuning:**
+  - **Panel:** `deepseek-flash`, `glm-flash` and `Qwen` on the local endpoint. Each answers one question per pair, "would fixing one fix the other?", without seeing the matcher's answer; the label is what at least 2 of 3 say.
+  - **Sample:** 200 pairs of findings from different runs on development PRs, drawn from the final matcher's output: 100 it linked and 100 near-misses it didn't (the same file, or linked by the judge's dedup).
+  - **Pass:** the matcher agrees with the panel on at least 90% of each half separately, so a matcher that links nothing cannot pass.
+  - **Panel health:** all three models agree on at least 70% of the pairs. Below that the check is inconclusive, and question 1 is not scored with this matcher until the cause is understood.
+  - **Limit:** this measures agreement with three other models, not ground truth; an error all three share goes unseen.
 - **Selection rule, fixed before any Phase B scoring:**
   - Recall floor: at least 90% of one run's recall on the same PRs (point estimate).
   - Among configurations that meet it, the fewest false positives per PR; then the cheapest within one bootstrap standard error of it. A configuration's cost includes its matching step, which Phase A's costs leave out.
