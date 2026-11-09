@@ -18,6 +18,8 @@ Exploratory, re-scored from existing runs, no new review runs. It shapes Phase B
 
 ## Question 1: m of n runs (Gate 3 PRs)
 
+![Question 1: every m of n](v2-preview-q1-plot.png)
+
 One run costs $0.059 on average.
 
 | Keep issues found by | Precision | Recall | FP per PR | Cost per PR |
@@ -51,6 +53,8 @@ Paired bootstrap against one run:
 - Runs are cheap: four cost $0.24 per PR. The curve has not flattened at n = 4, so Phase B's k = 5 is needed to find where it does.
 
 ## Question 2: the verifier's role (Gate 4 PRs, 2 runs)
+
+![Question 2: the verifier's roles](v2-preview-q2-plot.png)
 
 One run costs $0.066; one verifier pass over a run's findings $0.307, about 4.7 runs.
 
