@@ -92,4 +92,6 @@ Paired bootstrap against `2 runs, agreed`:
 - **Question 1:** keep issues found by all n runs; n is at least 3, chosen in Phase B from k = 5 runs.
 - **Question 2:** with the current verifier, none of its roles beats more runs at the same cost. Only role (a) with CONFIRMED only goes further on false positives, and it fails the recall floor. Phase B keeps role (a) as the one verifier candidate, run on the agreed issues only, where it is cheapest; it is kept only by PLAN-v2's selection rule.
 
+**Decided after this preview (Jim, 2026-11-09):** the verifier is abandoned, replaced by intersections of `/code-review` runs. Phase B does not run it.
+
 Scripts (`preview_merge.py`, `preview_analysis.py`) were run from a scratch directory on 2026-11-08–09 and are not part of the repository.
