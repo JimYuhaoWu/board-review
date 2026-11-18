@@ -14,6 +14,8 @@ Usage (from the repo root, after `uv sync`):
     uv run python -m eval.runner run --variant board-none (--prs IDS | --set S) --repeat N       # Gate 4, B1
     uv run python -m eval.runner run --variant board-full --members default (--prs IDS | --set S) \
         --repeat N                                                                            # Gate 4, B2
+    uv run python -m eval.runner run --variant code-review --level L --results-dir DIR (--prs IDS | --set S) \
+        --repeat N                                                                            # PLAN-v2 modes
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
     uv run python -m eval.runner pack --variant V [--members ID] (--prs IDS | --set S) --repeat N   # zip for judging
@@ -51,7 +53,7 @@ from eval.runner import martian, qodo
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
 from eval.runner.run import (
-    BOARD_CR, BOARD_NONE, PLUGIN_DIR, TWO_SESSION, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
+    BOARD_CR, BOARD_NONE, LEVEL, LEVELS, PLUGIN_DIR, TWO_SESSION, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
     run_one, stale_reason,
 )
 from eval.runner.split import SEED, Split, drawn_before, make_draw, make_split, write_frozen
@@ -132,6 +134,7 @@ def _add_selection(p: argparse.ArgumentParser) -> None:
         help="board roster: full, one member id on development PRs, or several ids with --smoke-repo",
     )
     p.add_argument("--intent-file", type=Path, help="PR title and description, with --smoke-repo")
+    p.add_argument("--level", choices=LEVELS, default=LEVEL, help="/code-review's level argument (PLAN-v2 modes)")
     p.add_argument("--dataset-dir", type=Path, default=DATASET_DIR)
     p.add_argument("--data-dir", type=Path, default=_default_data_dir())
     p.add_argument("--results-dir", type=Path, default=ROOT / "eval" / "results")
@@ -209,6 +212,12 @@ def _draw(args: argparse.Namespace) -> int:
 
 def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     variants = VARIANTS if args.variant == "both" else (args.variant,)
+    if args.level != LEVEL:
+        if args.variant != "code-review":
+            raise SystemExit("--level is for code-review runs")
+        # Result folders don't name the level yet, so another level would mix with the medium runs.
+        if args.results_dir.resolve() == (ROOT / "eval" / "results").resolve():
+            raise SystemExit(f"--level {args.level} needs its own --results-dir")
     if args.variant in TWO_SESSION and args.members != "full":
         raise SystemExit(f"{args.variant} sets its own roster; leave out --members")
     members = "none" if args.variant == BOARD_NONE else args.members
@@ -247,7 +256,7 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     return [
         RunSpec(
             dataset=d, pr_id=i, variant=v, repeat=args.repeat, repo=repo, base=base, head=head,
-            members=members, intent=intent,
+            members=members, intent=intent, level=args.level,
         )
         for d, i, repo, base, head, intent in targets
         for v in variants

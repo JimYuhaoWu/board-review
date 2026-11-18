@@ -42,6 +42,9 @@ from eval.scoring.data import EXTRA_MEMBER, code_review_member_output
 PINNED_VERSION = "2.1.317"
 MODEL = "claude-sonnet-5-5"
 EFFORT = "medium"
+# `/code-review`'s own level argument (PLAN-v2 question 3); the session effort stays EFFORT.
+LEVELS = ("low", "medium", "high", "xhigh", "max")
+LEVEL = "medium"
 VARIANTS = ("code-review", "board-full")
 BOARD_CR = "board-cr"
 BOARD_NONE = "board-none"
@@ -79,6 +82,7 @@ class RunSpec(BaseModel):
     head: str
     model: str = MODEL
     effort: str = EFFORT
+    level: str = LEVEL
     members: str = "full"
     intent: str = ""
 
@@ -196,7 +200,7 @@ def prompt_for(spec: RunSpec, intent_file: Path | None, extra_file: Path | None 
     """The variant's command. Both variants get the PR's title and description (PLAN 5.1)."""
     target = f"{spec.base}..{spec.head}"
     if spec.variant == "code-review":
-        prompt = f"/code-review medium --max-findings all {target}"
+        prompt = f"/code-review {spec.level} --max-findings all {target}"
         return f"{prompt}\n\n{spec.intent}" if spec.intent else prompt
     if spec.variant.startswith("board-"):
         # A file, because PR descriptions can contain `--flags` that --intent would misparse.
@@ -213,13 +217,16 @@ def command_for(
     # The input files live outside the worktree, so the reviewers need read access to their folders.
     folders = dict.fromkeys(str(f.parent) for f in (intent_file, extra_file) if f)
     add_dir = [arg for folder in folders for arg in ("--add-dir", folder)]
+    # Native /code-review runs without the board: at levels that start reviewer subagents, it would
+    # pick the board's member and verifier agents (Y13, max on ghost-2).
+    plugin = [] if spec.variant == "code-review" else ["--plugin-dir", str(plugin_dir)]
     return [
         claude, "-p", prompt_for(spec, intent_file, extra_file),
         *add_dir,
         "--model", spec.model,
         "--effort", spec.effort,
         "--output-format", "stream-json", "--verbose",
-        "--plugin-dir", str(plugin_dir),
+        *plugin,
         # Ignore a benchmark repo's own .claude/settings.json (hooks) and .mcp.json.
         "--setting-sources", "user",
         "--strict-mcp-config",

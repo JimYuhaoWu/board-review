@@ -582,3 +582,28 @@ def test_default_board_writes_no_cache(tmp_path: Path, monkeypatch: pytest.Monke
     assert runner.run_one(spec, paths, "B").status == "ok"
     assert runner.cache_clash(paths, spec) is None
     assert not paths.cache.exists(), "the default board's labels come from a smaller roster"
+
+
+def test_level_sets_the_code_review_argument_only(tmp_path: Path):
+    spec = _spec(tmp_path, "code-review", tmp_path, "b" * 40, "h" * 40).model_copy(update={"level": "xhigh"})
+    assert runner.prompt_for(spec, None).startswith("/code-review xhigh --max-findings all ")
+    command = runner.command_for(spec, "claude")
+    assert command[command.index("--effort") + 1] == "medium"
+
+
+def test_level_runs_need_their_own_results_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    common = ["run", "--variant", "code-review", "--prs", DEV_PR, "--repeat", "1", "--dry-run", "--level", "max"]
+    with pytest.raises(SystemExit, match="needs its own --results-dir"):
+        cli.main(common)
+    with pytest.raises(SystemExit, match="for code-review runs"):
+        cli.main([*common[:2], "board-full", *common[3:], "--results-dir", str(tmp_path)])
+    cli.main([*common, "--results-dir", str(tmp_path)])
+    assert "/code-review max --max-findings all" in capsys.readouterr().out
+
+
+def test_native_code_review_runs_without_the_board_plugin(tmp_path: Path):
+    review = _spec(tmp_path, "code-review", tmp_path, "b" * 40, "h" * 40)
+    assert "--plugin-dir" not in runner.command_for(review, "claude")
+    for variant in ("board-full", "board-none"):
+        assert "--plugin-dir" in runner.command_for(review.model_copy(update={"variant": variant}), "claude")
+
