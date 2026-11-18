@@ -1,6 +1,6 @@
 # Consensus review: plan v2
 
-Status: **approved 2026-11-08 (Jim); Phase A done, Phase B next.** Yara reviews it after the merge; changes come as pull requests, before any Phase B run.
+Status: **approved 2026-11-08 (Jim); Phases A and B done (2026-11-18), Phase C next.** Changes come as pull requests.
 
 [PLAN.md](PLAN.md) (v1) is the record of the board project, closed after Gate 4. Its fixed settings (5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
@@ -85,11 +85,12 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
   - Recall floor: at least 90% of one run's recall on the same PRs (point estimate).
   - Among configurations that meet it, the fewest false positives per PR; then the cheapest within one bootstrap standard error of it. A configuration's cost includes its matching step, which Phase A's costs leave out.
 - **Output:** one fixed add-on (n, m, matching prompt and model), frozen before Phase C, and a figure of false positives per PR against recall for every (m, n) up to n = 5, with cost shown.
+- **Result (2026-11-18), the frozen add-on:** **n = 5, m = 5**: keep the issues all 5 runs found, matched by `claude-sonnet-5-5` at effort `medium` with `MATCH_PROMPT` (sha256 `d8e289503446…`). On the 39 PRs: 1.59 false positives per PR against one run's 4.68 (−3.09, 95% CI −3.60 to −2.56), recall 67.2% against 73.3% (92%, floor 90%), $0.31 per PR. The rule picks 5 of 5 in each dataset alone too. Report: `eval/reports/phase-b.md`.
 
 ### Phase C: confirmation in every mode (question 3)
 
 - **PRs:** the 28 Qodo test PRs no gate has used (none from redis: Gates 3 and 4 used all of its test PRs), and the 30 Martian test PRs, pooled into 58 PRs as Phase B pools its two datasets; each dataset is also reported alone. Logged as usual (v1 6.6).
-- **Per mode** (`low`, `medium`, `high`, `xhigh`): n native runs per PR at that mode, with n from Phase B. The add-on is the frozen add-on over those n runs; the native baseline is each of the same runs scored alone, averaged. Fully paired, and half the runs of 2 add-on repeats.
+- **Per mode** (`low`, `medium`, `high`, `xhigh`): 5 native runs per PR at that mode (n from Phase B). The add-on is the frozen add-on over those n runs; the native baseline is each of the same runs scored alone, averaged. Fully paired, and half the runs of 2 add-on repeats.
 - **Every run passes its level and `--max-findings all` explicitly:** `/code-review` remembers the last choice in the config folder, which parallel runs share.
 - **No board plugin in native sessions:** since Y13 the runner starts native `/code-review` without `--plugin-dir`, so a level that starts subagents can't pick the board's agents. Phase B's runs had the plugin loaded; none of the 293 native runs at `medium` started a subagent, so the plugin had nothing to act on there, but Phase C's setup differs from Phase B's in this one respect.
 - **Decision per mode:** false positives per PR, add-on − native, paired bootstrap over PRs; the CI must be below 0 after a Holm correction over the 4 modes, and the add-on's recall at least 90% of the native runs' (point estimate).
@@ -100,9 +101,9 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 
 - One `/code-review` run at `medium` is about $0.07 (Gate 4).
 - Phase B: 127 new runs on 39 PRs ≈ $8–9. Account B; judging on account A.
-- Phase C, per run (Y13, 2 PRs): `low` $0.02–0.05, `medium` about $0.06, `high` $0.07–0.12, `xhigh` $0.22–0.31. At n = 3 on 58 PRs, 174 runs a mode: about $6 (`low`), $10 (`medium`), $17 (`high`) and $47 (`xhigh`), about $80 in all.
-- **Weekly limit.** v1 section 7 plans around the 5-hour window, but Gate 4's overnight batch (about $40) stopped at account B's weekly limit. Phase C is n × 58 × 4 runs, 696 at n = 3; it is split into batches that each fit the weekly limit.
+- Phase C, per run (Y13, 2 PRs): `low` $0.02–0.05, `medium` about $0.06, `high` $0.07–0.12, `xhigh` $0.22–0.31. At n = 5 on 58 PRs, 290 runs a mode: about $10 (`low`), $16 (`medium`), $28 (`high`) and $77 (`xhigh`), about $130 in all, plus about $7 of matching (one call per PR and mode, on account A).
+- **Weekly limit.** v1 section 7 plans around the 5-hour window, but Gate 4's overnight batch (about $40) stopped at account B's weekly limit. Phase C is 5 × 58 × 4 = 1,160 runs; it is split into batches that each fit the weekly limit.
 
 ## 7. Open
 
-- Nothing at present.
+- 5 of 5 kept 92% of one run's recall in Phase B, close to the 90% floor (91% on Martian). Phase C can fail a mode on recall as well as on false positives.

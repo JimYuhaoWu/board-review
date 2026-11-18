@@ -40,7 +40,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 | J6 | **Gate 3 support:** `--extra-findings` in the skill; `code_review_member_output` (a `/code-review` run as one `member_output`); `merge` and the per-issue views; `gate3` | ✅ 2026-11-06 |
 | J7 | **Gate 4 scoring:** views `board-none`, `board-default`, `code-review-b1` (B1's `/code-review` sessions judged alone); false positives per PR; `gate4` | ✅ 2026-11-07 |
 | J8 | **Gate 4 report**, with the format-slip normalization (#48) and the pipeline check | ✅ 2026-11-08: NO DECISION, the board project closes. Judge check not done (Jim) |
-| J9 | **PLAN v2, Phase B scoring** ([PLAN-v2.md](PLAN-v2.md)): the matching step (its own model), m-of-n scoring over every subset of k runs, the Phase B selection, and the figure of false positives against recall | ☐ |
+| J9 | **PLAN v2, Phase B scoring** ([PLAN-v2.md](PLAN-v2.md)): the matching step (its own model), m-of-n scoring over every subset of k runs, the Phase B selection, and the figure of false positives against recall | ✅ 2026-11-18. 5 of 5 chosen; `eval/reports/phase-b.md` |
 | J5 | **Member card and combined scoring** (PLAN 6.5, 6.7): the card in `python -m eval.scoring members`; scoring a single-member run (Y7) combined with the other members' findings from the full run. See "Testing one member" below | card ✅ (2026-11-04); combined scoring ☐, needs Y7 |
 
 Judging runs only on account A's machine, because the local endpoint key is personal.
