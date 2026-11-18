@@ -31,7 +31,7 @@ There is **no verifier** (question 2). Question 1 chooses n and m; question 3 te
 
 1. **How many repeats?** Which (m, n) gives the fewest false positives per PR while keeping recall, and is the step from 2 to 3 runs worth its cost?
 2. **What should the verifier do?** **Closed (Jim, 2026-11-09): the verifier is abandoned, replaced by intersections of `/code-review` runs.** In Phase A it cost as much as 4–5 runs; the roles that kept recall removed few false positives, and the role that removed many lost recall below a 90% floor. It was not tuned, and this was not a head-to-head test: the decision rests on cost and on keeping the add-on simple.
-3. **Does the add-on improve the original in every mode?** The modes are `/code-review`'s effort levels `low`, `medium`, `high`, `xhigh` and `max`: the level argument (`/code-review high`). The session's own `--effort` stays at `medium` (v1 5.1), so a mode changes one setting only. **Ultra is out of scope**: it runs in the cloud and needs a human to launch it, which defeats the goal.
+3. **Does the add-on improve the original in every mode?** The modes are `/code-review`'s effort levels `low`, `medium`, `high` and `xhigh`: the level argument (`/code-review high`). The session's own `--effort` stays at `medium` (v1 5.1), so a mode changes one setting only. **Ultra is out of scope**: it runs in the cloud and needs a human to launch it, which defeats the goal. **`max` is out of scope (Jim, 2026-11-18)**: it starts reviewer subagents, and both of Y13's `max` runs were cut off at the 5-hour limit after $14–19, about 260–410 times a `medium` run.
 
 ## 5. Phases
 
@@ -89,19 +89,20 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 ### Phase C: confirmation in every mode (question 3)
 
 - **PRs:** the 28 Qodo test PRs no gate has used (none from redis: Gates 3 and 4 used all of its test PRs), and the 30 Martian test PRs, pooled into 58 PRs as Phase B pools its two datasets; each dataset is also reported alone. Logged as usual (v1 6.6).
-- **Per mode** (`low`, `medium`, `high`, `xhigh`, `max`): n native runs per PR at that mode, with n from Phase B. The add-on is the frozen add-on over those n runs; the native baseline is each of the same runs scored alone, averaged. Fully paired, and half the runs of 2 add-on repeats.
+- **Per mode** (`low`, `medium`, `high`, `xhigh`): n native runs per PR at that mode, with n from Phase B. The add-on is the frozen add-on over those n runs; the native baseline is each of the same runs scored alone, averaged. Fully paired, and half the runs of 2 add-on repeats.
 - **Every run passes its level and `--max-findings all` explicitly:** `/code-review` remembers the last choice in the config folder, which parallel runs share.
-- **Decision per mode:** false positives per PR, add-on − native, paired bootstrap over PRs; the CI must be below 0 after a Holm correction over the 5 modes, and the add-on's recall at least 90% of the native runs' (point estimate).
-- **Claim:** "the add-on improves `/code-review` in every mode" only if all 5 modes pass; otherwise the modes that pass are reported as such.
+- **No board plugin in native sessions:** since Y13 the runner starts native `/code-review` without `--plugin-dir`, so a level that starts subagents can't pick the board's agents. Phase B's runs had the plugin loaded; none of the 293 native runs at `medium` started a subagent, so the plugin had nothing to act on there, but Phase C's setup differs from Phase B's in this one respect.
+- **Decision per mode:** false positives per PR, add-on − native, paired bootstrap over PRs; the CI must be below 0 after a Holm correction over the 4 modes, and the add-on's recall at least 90% of the native runs' (point estimate).
+- **Claim:** "the add-on improves `/code-review` in every mode" only if all 4 modes pass; otherwise the modes that pass are reported as such.
 - **Judge check:** Jim's 60-pair blind check is required before the result is final (v1's rule; below 85% agreement, NOT DECIDED). Gate 4 skipped it; Phase C doesn't.
 
 ## 6. Cost
 
 - One `/code-review` run at `medium` is about $0.07 (Gate 4).
 - Phase B: 127 new runs on 39 PRs ≈ $8–9. Account B; judging on account A.
-- Phase C: the cost per mode is unknown above `medium`. Yara's smoke test (Y13) measures one run per mode on 2 PRs before the budget is agreed.
-- **Weekly limit.** v1 section 7 plans around the 5-hour window, but Gate 4's overnight batch (about $40) stopped at account B's weekly limit. Phase C is n × 58 × 5 runs, 870 at n = 3; at `max` that may be hundreds of dollars. Its size is set from Y13's costs against the weekly limit before any Phase C run: `max` may run on fewer PRs, or be reported without deciding.
+- Phase C, per run (Y13, 2 PRs): `low` $0.02–0.05, `medium` about $0.06, `high` $0.07–0.12, `xhigh` $0.22–0.31. At n = 3 on 58 PRs, 174 runs a mode: about $6 (`low`), $10 (`medium`), $17 (`high`) and $47 (`xhigh`), about $80 in all.
+- **Weekly limit.** v1 section 7 plans around the 5-hour window, but Gate 4's overnight batch (about $40) stopped at account B's weekly limit. Phase C is n × 58 × 4 runs, 696 at n = 3; it is split into batches that each fit the weekly limit.
 
 ## 7. Open
 
-- Whether `max` fits the budget, after Y13.
+- Nothing at present.
