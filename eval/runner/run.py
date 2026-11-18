@@ -217,13 +217,16 @@ def command_for(
     # The input files live outside the worktree, so the reviewers need read access to their folders.
     folders = dict.fromkeys(str(f.parent) for f in (intent_file, extra_file) if f)
     add_dir = [arg for folder in folders for arg in ("--add-dir", folder)]
+    # Native /code-review runs without the board: at levels that start reviewer subagents, it would
+    # pick the board's member and verifier agents (Y13, max on ghost-2).
+    plugin = [] if spec.variant == "code-review" else ["--plugin-dir", str(plugin_dir)]
     return [
         claude, "-p", prompt_for(spec, intent_file, extra_file),
         *add_dir,
         "--model", spec.model,
         "--effort", spec.effort,
         "--output-format", "stream-json", "--verbose",
-        "--plugin-dir", str(plugin_dir),
+        *plugin,
         # Ignore a benchmark repo's own .claude/settings.json (hooks) and .mcp.json.
         "--setting-sources", "user",
         "--strict-mcp-config",

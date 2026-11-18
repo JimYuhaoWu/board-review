@@ -600,3 +600,10 @@ def test_level_runs_need_their_own_results_dir(tmp_path: Path, capsys: pytest.Ca
     cli.main([*common, "--results-dir", str(tmp_path)])
     assert "/code-review max --max-findings all" in capsys.readouterr().out
 
+
+def test_native_code_review_runs_without_the_board_plugin(tmp_path: Path):
+    review = _spec(tmp_path, "code-review", tmp_path, "b" * 40, "h" * 40)
+    assert "--plugin-dir" not in runner.command_for(review, "claude")
+    for variant in ("board-full", "board-none"):
+        assert "--plugin-dir" in runner.command_for(review.model_copy(update={"variant": variant}), "claude")
+
