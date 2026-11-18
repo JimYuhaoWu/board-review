@@ -24,12 +24,13 @@ from collections import Counter
 
 from tqdm import tqdm
 
+from . import consensus
 from .board import label_stats, member_cards, member_stats, members_in, select_default
 from .gates import GATE1B_TOOLS
 from .data import ROOT, iter_runs, load_dataset, member_categories, subagent_usage
 from .llm import EndpointUnavailable, JudgeModel, LLMError
 from .metrics import bootstrap, category_recall, per_pr, summarize
-from .pipeline import MERGED, RESULTS, judge_run, judge_slug, load_records, merge_records
+from .pipeline import MERGED, RESULTS, judge_run, judge_slug, load_records, merge_records, record_path
 from .views import panel, parse_view, score
 
 TEST_LOG = ROOT / "eval" / "reports" / "test-split-log.md"
@@ -465,6 +466,41 @@ def cmd_gate4(args) -> None:
     print(f"\n**Gate 4: {gate4_verdict(fp['ci95'], floor_met)}**")
 
 
+def cmd_consensus_match(args) -> None:
+    """PLAN v2: the add-on's matching step over the first k runs of each PR, once per PR."""
+    made, missing, cost = 0, [], 0.0
+    for pid in tqdm(pr_ids(args), desc="match", unit="PR"):
+        by_repeat = {r["repeat"]: r for r in load_records(args.dataset, args.judge, "code-review", [pid])}
+        if len(by_repeat) < args.k:
+            missing.append(pid)
+            continue
+        out = record_path(args.dataset, args.judge, consensus.consensus_variant(args.model), pid, args.k)
+        if out.exists() and not args.force:
+            continue
+        rec = consensus.match_runs([by_repeat[k] for k in sorted(by_repeat)[: args.k]], args.model)
+        consensus.write_record(rec)
+        made += 1
+        cost += rec["matching"]["cost_usd"]
+    print(f"{made} consensus records, ${cost:.2f} of matching calls")
+    if missing:
+        print(f"Fewer than {args.k} judged runs: " + ", ".join(missing))
+
+
+def cmd_consensus(args) -> None:
+    """PLAN v2, Phase B: every m of n up to k, pooled over the datasets, and the selection rule."""
+    records = []
+    for name in args.dataset.split(","):
+        one = argparse.Namespace(**{**vars(args), "dataset": name})
+        records += load_records(name, args.judge, consensus.consensus_variant(args.model), pr_ids(one))
+    records = [r for r in records if r["repeat"] == args.k]
+    if not records:
+        sys.exit("no consensus records; run consensus-match first")
+    text, numbers = consensus.report(records, args.profile, args.bootstrap)
+    print(text)
+    if args.out:
+        Path(args.out).write_text(json.dumps(numbers, indent=1), encoding="utf-8")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -542,6 +578,24 @@ def main() -> None:
     g1.add_argument("--concurrency", type=int, default=4, help="calls in flight at once")
     g1.add_argument("--rate", type=float, default=60.0, help="most calls started per minute")
     g1.add_argument("--max-wait", type=float, default=30, help="minutes to wait out a busy or unreachable endpoint")
+    cm = sub.add_parser("consensus-match", help="PLAN v2: the matching step over k /code-review runs per PR")
+    cm.add_argument("--dataset", required=True)
+    cm.add_argument("--judge", required=True)
+    cm.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    cm.add_argument("--release", help="why test PRs are being touched; required for test or all (PLAN 6.6)")
+    cm.add_argument("--k", type=int, default=5, help="runs per PR")
+    cm.add_argument("--model", required=True, help="the matching model, for example claude-haiku-5-5")
+    cm.add_argument("--force", action="store_true", help="match again even if the record exists")
+    co = sub.add_parser("consensus", help="PLAN v2, Phase B: every m of n up to k, and the selection rule")
+    co.add_argument("--dataset", required=True, help="one dataset, or several comma-separated to pool")
+    co.add_argument("--judge", required=True)
+    co.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    co.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+    co.add_argument("--k", type=int, default=5)
+    co.add_argument("--model", required=True)
+    co.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    co.add_argument("--bootstrap", type=int, default=2000)
+    co.add_argument("--out", help="also write the table as JSON, for the figure")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
@@ -555,7 +609,8 @@ def main() -> None:
         cmd_gate1(args)
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
-         "gate3": cmd_gate3, "gate4": cmd_gate4}[args.cmd](args)
+         "gate3": cmd_gate3, "gate4": cmd_gate4, "consensus-match": cmd_consensus_match,
+         "consensus": cmd_consensus}[args.cmd](args)
 
 
 if __name__ == "__main__":

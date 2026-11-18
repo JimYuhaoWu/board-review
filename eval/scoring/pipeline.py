@@ -112,6 +112,23 @@ async def judge_run(run: Run, golden: list[dict], jm: JudgeModel, whole: bool = 
 MERGED = "code-review-x2"  # two `/code-review` runs merged into one review (PLAN Gate 3, variant A1)
 
 
+def concat_records(records: list[dict]) -> tuple[list[dict], list[dict], list[list[dict]]]:
+    """Candidates, findings and verdicts of one PR's judged `/code-review` runs, one after another.
+    Finding ids get the source repeat as a prefix (`r1/cr-1`)."""
+    candidates, findings = [], []
+    for r in records:
+        prefix = f"r{r['repeat']}/"
+        findings += [{**f, "id": prefix + f["id"], "group": None} for f in r.get("findings", [])]
+        for i, c in enumerate(r["candidates"]):
+            fid = prefix + (c["finding"] or f"x{i}")
+            if not c["finding"]:  # a reply without structured findings: each extracted issue stands as one
+                findings.append({"id": fid, "member": None, "label": None, "group": None,
+                                 "file": None, "line": None, "text": c["text"]})
+            candidates.append({**c, "finding": fid})
+    verdicts = [sum((r["verdicts"][g] for r in records), []) for g in range(len(records[0]["golden"]))]
+    return candidates, findings, verdicts
+
+
 async def merge_records(records: list[dict], jm: JudgeModel, repeat: int) -> Path:
     """Merge judged `/code-review` records of one PR into one review, variant `code-review-x2`.
 
@@ -129,17 +146,7 @@ async def merge_records(records: list[dict], jm: JudgeModel, repeat: int) -> Pat
     if len({r["judge"]["fingerprint"] for r in records}) > 1:
         raise ValueError("records to merge were judged by different served models")
 
-    candidates, findings = [], []
-    for r in records:
-        prefix = f"r{r['repeat']}/"
-        findings += [{**f, "id": prefix + f["id"], "group": None} for f in r.get("findings", [])]
-        for i, c in enumerate(r["candidates"]):
-            fid = prefix + (c["finding"] or f"x{i}")
-            if not c["finding"]:  # a reply without structured findings: each extracted issue stands as one
-                findings.append({"id": fid, "member": None, "label": None, "group": None,
-                                 "file": None, "line": None, "text": c["text"]})
-            candidates.append({**c, "finding": fid})
-    verdicts = [sum((r["verdicts"][g] for r in records), []) for g in range(len(first["golden"]))]
+    candidates, findings, verdicts = concat_records(records)
 
     groups, fell_back = await jm.dedup([c["text"] for c in candidates])
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.scoring import pipeline
+from eval.scoring import consensus, pipeline
 from eval.scoring.data import Run, parse_board_output, render_finding
 from eval.scoring.martian import step3_judge_comments as m3
 from eval.scoring.metrics import bootstrap, counts, per_pr, summarize
@@ -673,3 +673,70 @@ def test_board_findings_undoes_gate4_format_slips():
     no_member = {"findings": [{**f2, "group": "G2"}]}
     assert board_findings(no_member)[0]["member"] == "intent"
     assert board_findings({"findings": [{"id": "test-auditor-3", "claim": "c"}]})[0]["member"] == "test-auditor"
+
+
+def _consensus_runs():
+    """Two runs of one PR: a real bug both find, a finding only one has each, and a false alarm both raise."""
+    golden = [{"comment": "G-a", "severity": "Unrated", "category": "bug"},
+              {"comment": "G-b", "severity": "Unrated", "category": "bug"}]
+
+    def rec(repeat, texts):
+        cands = [{"text": t, "finding": f"cr-{i + 1}", "member": None, "label": None} for i, t in enumerate(texts)]
+        return {"schema_version": 1, "dataset": "d", "variant": "code-review", "pr_id": "p1", "repeat": repeat,
+                "source_sha256": str(repeat), "judge": {"model": "fake", "fingerprint": "f1", "served": {}},
+                "golden": golden, "candidates": cands, "groups": None, "dedup_fallback": False,
+                "verdicts": [[{"match": t.startswith(("a ", "b ")) and g["comment"][-1] == t[0], "confidence": 0.9,
+                               "reasoning": ""} for t in texts] for g in golden],
+                "run_meta": {"total_cost_usd": 0.05},
+                "findings": [{"id": c["finding"], "member": None, "label": None, "group": None, "file": None,
+                              "line": None, "text": c["text"]} for c in cands]}
+
+    return [rec(1, ["a one", "x one", "alarm one"]), rec(2, ["a two", "b two", "alarm two"])]
+
+
+def test_parse_groups_needs_every_finding_exactly_once():
+    assert consensus.parse_groups('Here: ```json\n{"groups": [[0, 2], [1]]}\n```', 3) == [[0, 2], [1]]
+    for bad in ('{"groups": [[0], [1]]}', '{"groups": [[0, 1], [1, 2]]}', "no json"):
+        with pytest.raises(ValueError):
+            consensus.parse_groups(bad, 3)
+
+
+def test_match_runs_retries_a_bad_reply_and_counts_its_cost():
+    replies = iter(["nonsense", '{"groups": [[0, 3], [1], [2, 5], [4]]}'])
+    rec = consensus.match_runs(_consensus_runs(), "fake-model", lambda p, m: (next(replies), 0.01))
+    assert rec["variant"] == "consensus-fake-model" and rec["merged_from"] == [1, 2] and rec["repeat"] == 2
+    assert rec["groups"] == [[0, 3], [1], [2, 5], [4]]
+    assert rec["matching"]["cost_usd"] == pytest.approx(0.02)
+    with pytest.raises(ValueError, match="no valid matching"):
+        consensus.match_runs(_consensus_runs(), "fake-model", lambda p, m: ("nonsense", 0.0))
+
+
+def test_m_of_n_keeps_only_issues_enough_runs_found():
+    rec = consensus.match_runs(_consensus_runs(), "fake", lambda p, m: ('{"groups": [[0, 3], [1], [2, 5], [4]]}', 0.0))
+    table = consensus.m_of_n([rec])
+    both = table[(2, 2)][("d/p1", 0)]  # the real bug and the shared false alarm survive, as one issue each
+    assert (both["tp"], both["fp"], both["fn"]) == (1, 1, 1)
+    union = table[(1, 2)][("d/p1", 0)]  # every issue kept, one count each
+    assert (union["tp"], union["fp"], union["fn"]) == (2, 2, 0)
+    assert set(table) == {(1, 1), (1, 2), (2, 2)} and len(table[(1, 1)]) == 2
+
+
+def test_matching_errors_count_against_the_add_on():
+    """A matcher that misses the agreement loses the issue, though the judge matched both findings."""
+    rec = consensus.match_runs(_consensus_runs(), "fake", lambda p, m: ('{"groups": [[0], [3], [1], [2, 5], [4]]}', 0.0))
+    both = consensus.m_of_n([rec])[(2, 2)][("d/p1", 0)]
+    assert (both["tp"], both["fp"], both["fn"]) == (0, 1, 2)
+
+
+def test_choose_applies_the_floor_then_fp_then_the_fewest_runs():
+    prs = [f"p{i}" for i in range(6)]
+
+    def unit(tp, fp, fn):
+        return {p: (tp, fp, fn) for p in prs}
+
+    units = {(1, 1): unit(8, 4, 2),  # recall 80%, floor 72%
+             (3, 3): unit(5, 0.1, 5),  # fewest false positives, but recall 50%
+             (2, 3): unit(8, 1.0, 2),
+             (2, 2): unit(8, 1.0, 2)}
+    picked = consensus.choose(units, n_boot=50)
+    assert (3, 3) not in picked["eligible"] and picked["chosen"] == (2, 2)
