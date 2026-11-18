@@ -62,13 +62,25 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 
 - **PRs:** the 24 Qodo and 15 Martian development PRs (the pilot PRs are among them). No test PR.
 - **Runs:** native `/code-review medium --max-findings all` (v1 5.1 settings), **k = 5** independent runs per PR, 195 in all. The 68 existing runs on these PRs have matching settings and are reused (2 per PR on 24 Qodo and 10 Martian PRs); 127 are new (3 more on those 34 PRs, 5 on the other 5 Martian PRs). Runs from Gates 3 and 4 are on test PRs and are not reused. Every subset of n ≤ 5 runs is scored, so one batch answers question 1.
-- **Matching step:** built and tuned here, as a `claude -p` session on the review's model and settings (`claude-sonnet-5-5`, effort `medium`): what a user of the add-on would run, and a model other than the judge, so the add-on and the scoring don't share errors. It is checked against the judge's dedup and a model panel before question 1 is scored with it; if it falls short, question 1 is not scored with it.
-- **Matching check, no human labels (Jim, 2026-11-09), fixed before any tuning:**
-  - **Panel:** `deepseek-flash`, `glm-flash` and `Qwen` on the local endpoint. Each answers one question per pair, "would fixing one fix the other?", without seeing the matcher's answer; the label is what at least 2 of 3 say.
-  - **Sample:** 200 pairs of findings from different runs on development PRs, drawn from the final matcher's output: 100 it linked and 100 near-misses it didn't (the same file, or linked by the judge's dedup).
-  - **Pass:** the matcher agrees with the panel on at least 90% of each half separately, so a matcher that links nothing cannot pass.
-  - **Panel health:** all three models agree on at least 70% of the pairs. Below that the check is inconclusive, and question 1 is not scored with this matcher until the cause is understood.
-  - **Limit:** this measures agreement with three other models, not ground truth; an error all three share goes unseen.
+- **Matching step, fixed (Jim, 2026-11-18):** a `claude -p` session on the review's model and settings (`claude-sonnet-5-5`, effort `medium`), with the prompt `MATCH_PROMPT` in `eval/scoring/consensus.py`, not tuned. It is what a user of the add-on would run, and a model other than the judge, so the add-on and the scoring don't share errors.
+- **Why Sonnet (exploratory):** development PRs, runs 1–2, 32 of the 34 PRs that have them (the judge's dedup was unusable on 2):
+
+  | Matching | Links between runs | 2 of 2: precision | Recall | FP per PR | Matching cost per PR |
+  |---|---|---|---|---|---|
+  | `claude-haiku-5-5` | 148 | 53.7% | 70.2% | 1.97 | $0.002 |
+  | `claude-sonnet-5-5` | 175 | 51.0% | 76.9% | 2.41 | $0.016 |
+  | the judge's dedup (reference) | 149 | 54.7% | 72.1% | 1.94 | n/a |
+
+  Haiku's links are a subset of Sonnet's. Sonnet's 27 extra links add 6.7 recall points and 0.44 false positives per PR; Jim chose Sonnet to protect recall.
+- **No separate matching check (Jim, 2026-11-18).** The model-panel check planned on 2026-11-09 (`deepseek-flash`, `glm-flash`, `Qwen`, 2 of 3; at least 90% agreement on 100 linked and 100 near-miss pairs) was dropped before its formal run. Trials on development pairs showed the panel's labels depend on the question's wording:
+
+  | Pairs | Panel says same: first wording | Reworded (main complaint only) |
+  |---|---|---|
+  | 30 sampled from the links both models make | 21 | 26 |
+  | the 27 links only Sonnet makes | 3 | 16 |
+
+  With the first wording, no matcher, the judge's dedup included, was likely to reach 90%.
+- **Limit:** matching errors count against the add-on only through their effect on its false positives and recall. Whether the groups themselves are right is not measured.
 - **Selection rule, fixed before any Phase B scoring:**
   - Recall floor: at least 90% of one run's recall on the same PRs (point estimate).
   - Among configurations that meet it, the fewest false positives per PR; then the cheapest within one bootstrap standard error of it. A configuration's cost includes its matching step, which Phase A's costs leave out.
