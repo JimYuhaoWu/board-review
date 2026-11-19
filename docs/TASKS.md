@@ -59,6 +59,7 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y11 | **Gate 4 runs** (PLAN Phase 3, Gate 4): `--members none` in SKILL.md; the `board-none` (B1) and `board-default` (B2) variants in the runner; `draw` excludes earlier draws; smoke tests measure B1's and B2's cost; the 24 Gate 4 PRs drawn; B1 and B2 r1–r2 on them, packed and sent | tests pass; both variants smoke-tested with costs reported; `gate4.json` merged with no Gate 3 PR in it; 96 runs `ok` | ☐ runner built and smoke-tested; the draw and runs next |
 | Y12 | **PLAN v2, Phase B runs**: native `/code-review medium` to k = 5 runs on the 24 Qodo and 15 Martian development PRs (r3–r5 where r1–r2 exist, r1–r5 on the 5 Martian PRs with none): 127 new runs | all `ok`, packed and sent | ✅ 2026-11-09, 127 runs, $6.78; all 195 Phase B runs `ok` at the same settings |
 | Y13 | **PLAN v2, mode smoke test**: one `/code-review` run at each of `low`, `high`, `xhigh`, `max` on 2 development PRs, to measure cost per mode for Phase C | costs reported | ✅ 2026-11-18. ghost-2 / sentry-93824 per run: low $0.02 / $0.05, high $0.07 / $0.12, xhigh $0.22 / $0.31 (39–148 s). `max` cut off at the 5-hour limit after $19.04 / $14.33 (20–22 min, 21 / 10 subagents), not rerun; the ghost-2 one used the board's agents, fixed in the runner |
+| Y14 | **PLAN v2, Phase C runs at `medium`**: 5 native `/code-review medium` runs on each of the 58 PRs in the two `phase-c.json` files, 290 runs. See "Phase C (Y14)" below | all `ok`, packed and sent | ☐ |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
 | Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ✅ 2026-11-04, 40 runs. Gate 2 v2: FAIL |
 | Y9 | **Gate 2 on Qodo** (PLAN Phase 3). See "Qodo (Y9)" below | `prs.jsonl` and `split.json` for Qodo merged; board and `/code-review`, 2 repeats each, on the 24 sampled PRs, all `ok`, packed and sent | ✅ 2026-11-05, 96 runs. Gate 2 on Qodo: FAIL |
@@ -120,6 +121,20 @@ Gate 2 failed on Qodo too. Gate 3 (PLAN Phase 3, agreed 2026-11-06) asks whether
 **Don't open the PRs' GitHub pages or their comments** (Y9).
 
 **Budget.** About $1–1.5 per board session and $0.05–0.10 per `/code-review` session: about $50–70 for 48 board sessions plus about $10 for 144 `/code-review` sessions (96 for A1, 48 inside `board-cr`). That's close to Y9's; if a usage stop comes first, run the same command again after the reset.
+
+## Phase C (Y14)
+
+PLAN v2, Phase C, reduced to `medium` (2026-11-19). The add-on is frozen; these runs only test it, on test PRs no gate has scored.
+
+1. **Pull `main`** and record the commit (`git log -1`).
+2. **PRs:** `eval/datasets/qodo/phase-c.json` (28) and `eval/datasets/martian/phase-c.json` (30). Pass each file's `prs` to `--prs`, comma-separated.
+3. **Run**, per dataset, with `--variant code-review --level medium` and the default results folder (no earlier runs exist on these PRs). Check with `--dry-run` first: every command must read `/code-review medium --max-findings all` and have no `--plugin-dir`. Run repeats 1 to 5 in order, so a usage stop leaves complete repeats first. Phase B's runs kept 2 in parallel; keep that.
+4. **Check** as in Y12: every run `ok`, the same model, effort, Claude Code version and account, no Task or Agent call. Report anything unusual rather than re-running silently.
+5. **Pack** `code-review`, repeats 1–5, per dataset, and send the zips.
+
+**Don't open the PRs' GitHub pages or their comments** (Y9). **Don't score or read these runs' findings**: judging runs on account A.
+
+**Budget.** About $0.06 a run: about $16 for 290, one batch. If a usage stop comes first, run the same command again after the reset.
 
 ## Testing one member (Y7 and J5)
 
