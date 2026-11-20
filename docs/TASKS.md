@@ -29,6 +29,27 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 - `split.json` (Y3): `{"seed": <int>, "dev": [pr_id, ...], "test": [pr_id, ...]}`.
 - Scoring writes its own records to `eval/results/<dataset>/judged/` (git-ignored). `eval/datasets/smoke/` is a one-PR example of the dataset format.
 
+### Revision inputs (PLAN v3, J10 and Y15)
+
+`python -m eval.scoring revise-inputs` (account A) writes one findings file per PR, input and revision repeat, and packs them with `--pack`; Y15's runner reads them.
+
+```
+eval/results/<dataset>/revise-inputs/<pr_id>/<input>-r<repeat>.json     (git-ignored; sent to account B)
+  {"schema_version": 1, "dataset", "pr_id", "input": "N1" | "C5" | "G", "repeat",
+   "source": {...provenance...},
+   "findings": [{"id": "F1", "texts": ["`file:line`: wording", ...]}, ...]}
+eval/results/<dataset>/revise-keys/<pr_id>/<input>-r<repeat>.json       (account A only, never packed)
+  which golden comments each finding matched, and its label: true | other (a rule issue under Core) | false
+```
+
+- **Inputs:**
+  - **N1:** repeat k holds native run k's findings, one wording each.
+  - **C5:** the issues all 5 runs found, each with all its wordings.
+  - **G:** the Core golden comments.
+  - C5 and G are the same in every repeat.
+- **Ids:** neutral, numbered F1, F2, … in order.
+- **How the reviser uses a file:** it gets every finding with all of its `texts`, and reports per id: `fixed` or `declined`, with a reason.
+
 ## Account A side (Jim)
 
 | id | Task | Status |
@@ -41,7 +62,7 @@ eval/cache/<dataset>/<pr_id>/r<repeat>/<member>@<model>/<config-hash>/<member-fi
 | J7 | **Gate 4 scoring:** views `board-none`, `board-default`, `code-review-b1` (B1's `/code-review` sessions judged alone); false positives per PR; `gate4` | ✅ 2026-11-07 |
 | J8 | **Gate 4 report**, with the format-slip normalization (#48) and the pipeline check | ✅ 2026-11-08: NO DECISION, the board project closes. Judge check not done (Jim) |
 | J9 | **PLAN v2, Phase B scoring** ([PLAN-v2.md](PLAN-v2.md)): the matching step (its own model), m-of-n scoring over every subset of k runs, the Phase B selection, and the figure of false positives against recall | ✅ 2026-11-18. 5 of 5 chosen; `eval/reports/phase-b.md` |
-| J10 | **PLAN v3, revision scoring** ([PLAN-v3.md](PLAN-v3.md), R0): the findings files for inputs N1, C5 and G (sent to account B); the injection diff (`head^..head`), hunk overlap, the exact-revert check and the fix judge; the scoring command, with tests | ☐ |
+| J10 | **PLAN v3, revision scoring** ([PLAN-v3.md](PLAN-v3.md), R0): the findings files for inputs N1, C5 and G (sent to account B); the injection diff (`head^..head`), hunk overlap, the exact-revert check and the fix judge; the scoring command, with tests | findings files ✅ 2026-11-20 (`revise-inputs`; 24 Qodo dev PRs × 3 inputs × 2 repeats; smoke pack for ghost-2 and prefect-1 sent); injection diff, fix judge and scoring ☐ |
 | J5 | **Member card and combined scoring** (PLAN 6.5, 6.7): the card in `python -m eval.scoring members`; scoring a single-member run (Y7) combined with the other members' findings from the full run. See "Testing one member" below | card ✅ (2026-11-04); combined scoring ☐, needs Y7 |
 
 Judging runs only on account A's machine, because the local endpoint key is personal.

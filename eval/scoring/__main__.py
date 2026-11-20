@@ -24,7 +24,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from . import consensus
+from . import consensus, revise
 from .board import label_stats, member_cards, member_stats, members_in, select_default
 from .gates import GATE1B_TOOLS
 from .data import ROOT, iter_runs, load_dataset, member_categories, subagent_usage
@@ -501,6 +501,34 @@ def cmd_consensus(args) -> None:
         Path(args.out).write_text(json.dumps(numbers, indent=1), encoding="utf-8")
 
 
+def cmd_revise_inputs(args) -> None:
+    """PLAN v3, R0: the reviser's findings files (N1, C5, G) per PR and repeat, and their keys."""
+    ids = pr_ids(args)
+    if args.prs:
+        wanted = args.prs.split(",")
+        if unknown := [p for p in wanted if p not in ids]:
+            sys.exit(f"not in the {args.split} split: {', '.join(unknown)}")
+        ids = wanted
+    variant = consensus.consensus_variant(args.model)
+    made, missing = 0, []
+    for pid in ids:
+        recs = [r for r in load_records(args.dataset, args.judge, variant, [pid]) if r["repeat"] == args.k]
+        if not recs:
+            missing.append(pid)
+            continue
+        for k in range(1, args.repeats + 1):
+            for name, (findings, key) in revise.build(recs[0], k, args.profile).items():
+                revise.write(args.dataset, pid, name, k, findings, key)
+                made += 1
+    print(f"{made} findings files on {len(ids) - len(missing)} PRs in {revise.inputs_dir(args.dataset)}; "
+          f"keys in {revise.keys_dir(args.dataset)} (account A only)")
+    if missing:
+        print(f"No {args.k}-run consensus record: " + ", ".join(missing))
+    if args.pack:
+        n = revise.pack(args.dataset, [p for p in ids if p not in missing], Path(args.pack))
+        print(f"packed {n} findings files, no keys, into {args.pack}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -596,6 +624,17 @@ def main() -> None:
     co.add_argument("--profile", choices=["strict", "core", "all"], default="core")
     co.add_argument("--bootstrap", type=int, default=2000)
     co.add_argument("--out", help="also write the table as JSON, for the figure")
+    ri = sub.add_parser("revise-inputs", help="PLAN v3: the reviser's findings files and their keys")
+    ri.add_argument("--dataset", required=True)
+    ri.add_argument("--judge", required=True)
+    ri.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    ri.add_argument("--release", help="why test PRs are being touched; required for test or all (PLAN 6.6)")
+    ri.add_argument("--prs", help="comma-separated PR ids within the split; default every PR in it")
+    ri.add_argument("--k", type=int, default=5, help="runs in the consensus record")
+    ri.add_argument("--model", default="claude-sonnet-5-5", help="the matching model of the consensus record")
+    ri.add_argument("--repeats", type=int, default=2, help="revision repeats; N1 repeat k uses run k")
+    ri.add_argument("--profile", choices=["strict", "core", "all"], default="core")
+    ri.add_argument("--pack", help="also zip the findings files (no keys) to this path, for account B")
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
@@ -610,7 +649,7 @@ def main() -> None:
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
          "gate3": cmd_gate3, "gate4": cmd_gate4, "consensus-match": cmd_consensus_match,
-         "consensus": cmd_consensus}[args.cmd](args)
+         "consensus": cmd_consensus, "revise-inputs": cmd_revise_inputs}[args.cmd](args)
 
 
 if __name__ == "__main__":

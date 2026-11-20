@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.scoring import consensus, pipeline
+from eval.scoring import consensus, pipeline, revise
 from eval.scoring.data import Run, parse_board_output, render_finding
 from eval.scoring.martian import step3_judge_comments as m3
 from eval.scoring.metrics import bootstrap, counts, per_pr, summarize
@@ -740,3 +740,27 @@ def test_choose_applies_the_floor_then_fp_then_the_fewest_runs():
              (2, 2): unit(8, 1.0, 2)}
     picked = consensus.choose(units, n_boot=50)
     assert (3, 3) not in picked["eligible"] and picked["chosen"] == (2, 2)
+
+
+def test_revise_inputs_hide_the_labels_and_follow_the_add_on():
+    """N1 is run k alone, C5 the issues both runs found with every wording, G the Core golden comments."""
+    rec = consensus.match_runs(_consensus_runs(), "fake", lambda p, m: ('{"groups": [[0, 3], [1], [2, 5], [4]]}', 0.0))
+    rec["golden"].append({"comment": "G-style", "severity": "Unrated", "category": "rule"})
+    rec["verdicts"].append([{"match": c["text"] == "alarm two", "confidence": 0.9, "reasoning": ""}
+                            for c in rec["candidates"]])  # run 2's alarm is a rule issue, not a false positive
+    out = revise.build(rec, 2)
+    n1, n1_key = out["N1"]
+    assert [f["texts"] for f in n1["findings"]] == [["a two"], ["b two"], ["alarm two"]]
+    assert [v["label"] for v in n1_key["findings"].values()] == ["true", "true", "other"]
+    c5, c5_key = out["C5"]
+    assert [f["texts"] for f in c5["findings"]] == [["a one", "a two"], ["alarm one", "alarm two"]]
+    assert c5_key["findings"] == {"F1": {"golden": [0], "label": "true"}, "F2": {"golden": [2], "label": "other"}}
+    assert revise.build(rec, 1)["N1"][1]["findings"]["F3"]["label"] == "false"
+    g, _ = out["G"]
+    assert [f["texts"] for f in g["findings"]] == [["G-a"], ["G-b"]]  # the rule issue is not Core
+    for doc, _ in out.values():
+        text = json.dumps(doc)
+        assert "golden" not in text.replace("golden_sha256", "") and "label" not in text and "verdict" not in text
+        assert [f["id"] for f in doc["findings"]] == [f"F{i + 1}" for i in range(len(doc["findings"]))]
+    with pytest.raises(ValueError, match="no run 3"):
+        revise.build(rec, 3)
