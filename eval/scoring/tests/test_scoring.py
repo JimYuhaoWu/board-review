@@ -857,3 +857,10 @@ def test_revision_decision_and_blind_check(tmp_path):
         w.writeheader()
         w.writerows(rows)
     assert revision.check_agreement(out) == {"pairs": 4, "answered": 3, "same": 2, "agreement": 2 / 3}
+def test_revise_files_are_written_with_lf(tmp_path, monkeypatch):
+    """Account B hashes the findings file's bytes (input_sha256), so they must not depend on the OS."""
+    monkeypatch.setattr(revise, "RESULTS", tmp_path)
+    revise.write("d", "p1", "N1", 1, {"findings": [{"id": "F1", "texts": ["a\nb"]}]}, {"findings": {}})
+    for kind in ("revise-inputs", "revise-keys"):
+        data = (tmp_path / "d" / kind / "p1" / "N1-r1.json").read_bytes()
+        assert b"\r\n" not in data and data.endswith(b"}\n")
