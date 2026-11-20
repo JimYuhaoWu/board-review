@@ -1,6 +1,6 @@
 # Review, then revise: plan v3
 
-Status: **draft (2026-11-19), not approved.** Decisions marked **Open** are Jim's. Nothing in it runs before it is merged.
+Status: **approved 2026-11-20 (Jim); R0 next.** Changes come as pull requests. Nothing runs before R0 is merged.
 
 [PLAN-v2.md](PLAN-v2.md) is the review add-on: native `/code-review` run 5 times at `medium`, matched by one Sonnet call, issues kept only when all 5 runs found them. Its Phase C test at `medium` runs in parallel (TASKS Y14); this plan does not wait for it. v1's fixed settings (PLAN 5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
@@ -20,7 +20,7 @@ Each Qodo PR's head is the upstream PR plus one commit, "update pr", that inject
 - `head^` is the PR **without** the planted issues: a reference fix for every planted issue at once;
 - `head^..head` is the **injection diff**: each planted issue sits in its hunks, and the golden comments give the file and lines.
 
-Martian's bugs are historical, with no clean reference commit, so v3 uses **Qodo only**. **Open:** add Martian later, judged against the golden comment alone.
+Martian's bugs are historical, with no clean reference commit, so v3 uses **Qodo only** (Jim, 2026-11-20). Martian could be added later, judged against the golden comment alone.
 
 ## 3. The reviser
 
@@ -30,7 +30,7 @@ Martian's bugs are historical, with no clean reference commit, so v3 uses **Qodo
 - **Outputs:**
   - **The edits:** `git diff` of the worktree against `head`.
   - **A report:** one line per finding, `fixed` or `declined` with a reason.
-- **The reviser may decline a finding it judges wrong.** Declining is the cheapest filter a fully automated pipeline has, and v3 measures how well it works (question 3). **Open**, recommended yes.
+- **The reviser may decline a finding it judges wrong.** Declining is the cheapest filter a fully automated pipeline has, and v3 measures how well it works (question 3). Decided: yes (Jim, 2026-11-20).
 - The prompt is fixed before R1 and may change only on development PRs (R1). It is frozen before R2.
 
 ## 4. Questions
@@ -56,7 +56,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
   - **Exact revert:** the revision restores `head^`'s text in that bug's injected hunk, so it is fixed. No judge is needed.
   - **Otherwise, a fix judge decides:** `deepseek-flash` on the local endpoint, at the usual judging rate. The judge sees the golden comment, the bug's injected hunk, and the revision's diff in that file, and answers FIXED or NOT FIXED.
   - **Check on the judge:** before R1's numbers are read, Jim checks it blind on 40 bug–revision pairs. At least 85% agreement is needed (v1's rule), and below that R1 is NOT DECIDED.
-- **Wrong edits per PR:** the off-target hunks, the number of edits a human would have to review and probably revert. Off-target edits are not all harmful: a reviser can fix a real upstream bug. The count is therefore an upper bound on damage and a direct measure of review burden. **Open:** a build or test check, deferred because the 8 repositories need 8 toolchains.
+- **Wrong edits per PR:** the off-target hunks, the number of edits a human would have to review and probably revert. Off-target edits are not all harmful: a reviser can fix a real upstream bug. The count is therefore an upper bound on damage and a direct measure of review burden. A build or test check is deferred (Jim, 2026-11-20): the 8 repositories need 8 toolchains.
 - **Also reported:**
   - planted rule issues fixed (the All profile);
   - lines changed;
@@ -99,12 +99,13 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
 - **Reviser:** the cost is unknown until Y15's smoke test. An editing session at `medium` is guessed at $0.10–0.30. At that price R1 would cost about $15–45 and R2 about $17–50, both on account B.
 - **Judging:** about 3 bugs per PR per run, minus exact reverts. That is at most about 430 calls for R1, roughly half an hour at 15 a minute.
 
-## 9. Open
+## 9. Decided and later
 
-1. Whether the reviser may decline findings. Recommended: yes.
-2. Qodo only for now. Recommended: yes; Martian lacks a clean reference.
-3. Build and test checks for wrong edits. Recommended: defer.
-4. **Later steps, not in v3:**
-   - review again after revising (a closed loop);
-   - letting the reviser run tests;
-   - stopping a revision before it edits.
+- **Decided (Jim, 2026-11-20):**
+  - The reviser may decline findings.
+  - Qodo only.
+  - Build and test checks are deferred.
+- **Later steps, not in v3:**
+  - review again after revising (a closed loop);
+  - letting the reviser run tests;
+  - stopping a revision before it edits.
