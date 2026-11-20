@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -134,6 +135,7 @@ def test_the_reviser_command_edits_with_read_only_git_and_no_board(tmp_path: Pat
     assert not any("commit" in a for a in allowed)
     prompt = command[2]
     assert "`HEAD~1..HEAD`" in prompt and findings.as_posix() in prompt and "intent.txt" in prompt
+    assert "Edit files with the Edit tool." in prompt
     assert runner.expected_setup(spec).plugin is None
 
 
@@ -187,6 +189,10 @@ def test_revise_run_writes_both_diffs_and_the_report(tmp_path: Path, monkeypatch
     assert b"+limit = 10" in (out / "revision.diff").read_bytes()
     assert (out / "vs-clean.diff").read_bytes() == b"", "the revision is the clean commit"
     assert json.loads((out / "report.json").read_text(encoding="utf-8"))["findings"][0]["action"] == "fixed"
+    assert b"\r\n" not in (out / "report.json").read_bytes()
+    findings = tmp_path / "f.json"
+    assert meta.revise["input_sha256"] == hashlib.sha256(findings.read_bytes()).hexdigest()[:12]
+    assert meta.revise["input_sha256"] != meta.revise["findings_sha256"]
     assert {k: meta.revise[k] for k in ("input", "prompt_sha256", "findings", "fixed", "declined")} == {
         "input": "G", "prompt_sha256": revise.PROMPT_SHA256, "findings": 2, "fixed": 1, "declined": 1}
     assert not any((tmp_path / "work" / "smoke" / "revise" / "smoke").iterdir()), "the clone and inputs are gone"

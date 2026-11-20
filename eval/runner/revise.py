@@ -35,6 +35,7 @@ For each finding:
 - If you judge it wrong, decline it and say why.
 
 Change nothing else: no refactoring, reformatting, or other fixes. Don't commit.
+Edit files with the Edit tool.
 You can read any file and use read-only git commands.
 
 End with only this JSON report, one entry per finding id in the file:

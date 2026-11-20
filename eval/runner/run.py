@@ -502,6 +502,8 @@ def _revise_session(spec: RunSpec, paths: Paths, account: str, out: Path) -> Run
     meta = _new_meta(spec, account, command)
     meta.revise = {
         "input": input_, "prompt_sha256": revise.PROMPT_SHA256,
+        # input_sha256 links the run to account A's file as received; findings_sha256 is what the reviser read.
+        "input_sha256": hashlib.sha256(spec.findings_file.read_bytes()).hexdigest()[:12],
         "findings_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12], "findings": len(findings),
     }
     started = time.monotonic()
@@ -615,7 +617,9 @@ def _finish(
             (out / "report.raw.txt").write_text(result.text, encoding="utf-8", newline="\n")
             meta.status, meta.detail = "failed:bad-report", str(e)[:300]
             return
-        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        (out / "report.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n"
+        )
         meta.parse_repair = repair
         actions = [e["action"] for e in report["findings"]]
         meta.revise = {**(meta.revise or {}), **{a: actions.count(a) for a in revise.ACTIONS}}
