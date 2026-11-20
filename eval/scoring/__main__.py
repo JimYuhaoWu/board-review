@@ -14,6 +14,7 @@ See eval/scoring/README.md.
 """
 
 import argparse
+import hashlib
 import asyncio
 import datetime as dt
 import json
@@ -24,7 +25,8 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from . import consensus, revise
+from . import consensus, revise, revision
+from .hunks import load_injection
 from .board import label_stats, member_cards, member_stats, members_in, select_default
 from .gates import GATE1B_TOOLS
 from .data import ROOT, iter_runs, load_dataset, member_categories, subagent_usage
@@ -529,6 +531,113 @@ def cmd_revise_inputs(args) -> None:
         print(f"packed {n} findings files, no keys, into {args.pack}")
 
 
+def _revise_runs(args) -> list[tuple[str, str, int]]:
+    """(input, pr_id, repeat) of every reviser run present for the split's PRs."""
+    ids = pr_ids(args)
+    found = []
+    for inp in args.inputs.split(","):
+        for pid in ids:
+            for d in sorted((RESULTS / args.dataset / f"revise-{inp}" / pid).glob("r*")):
+                if (d / "meta.json").exists():
+                    found.append((inp, pid, int(d.name[1:])))
+    return found
+
+
+async def cmd_revise_score(args) -> None:
+    """PLAN v3: score the reviser's runs; the fix judge decides bugs neither reverted nor untouched."""
+    ds = load_dataset(args.dataset)
+    injection = load_injection()
+    runs = _revise_runs(args)
+    print(f"{len(runs)} reviser runs")
+    jm = JudgeModel(args.judge, concurrency=args.concurrency, rate=args.rate, max_wait=args.max_wait * 60, log=tqdm.write)
+    try:
+        await jm.identify()
+    except (LLMError, EndpointUnavailable) as e:
+        print(f"{args.judge}: can't use the endpoint: {e}")
+        return
+    failed, skipped = [], 0
+    for inp, pid, k in tqdm(runs, desc="revise", unit="run"):
+        out = revision.scored_path(args.dataset, args.judge, inp, pid, k)
+        if out.exists() and not args.force:
+            skipped += 1
+            continue
+        rec = revision.score_run(args.dataset, inp, pid, k, ds.golden[pid], injection[pid]["blocks"])
+        try:
+            for b in rec.get("bugs", []):
+                if b["status"] == "judged":
+                    answer = await jm.fix(b["prompt"])
+                    b["fixed"], b["reasoning"] = answer["fixed"], answer.get("reasoning", "")
+        except LLMError as e:
+            failed.append(f"{inp} {pid} r{k}: {e}")
+            continue
+        except EndpointUnavailable as e:
+            print(f"STOPPED: {e}. Finished calls are cached; re-run to continue.")
+            return
+        rec["judge"] = {"model": args.judge, "fingerprint": jm.fingerprint,
+                        "prompt_sha256": hashlib.sha256(revision.FIX_PROMPT.encode()).hexdigest()[:12]}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(rec, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"{len(runs) - skipped - len(failed)} scored, {skipped} already scored, {jm.calls} new judge calls")
+    for line in failed:
+        print("  " + line)
+
+
+def _revise_records(args) -> dict[str, list[dict]]:
+    by: dict[str, list[dict]] = {}
+    for inp, pid, k in _revise_runs(args):
+        path = revision.scored_path(args.dataset, args.judge, inp, pid, k)
+        if path.exists():
+            by.setdefault(inp, []).append(json.loads(path.read_text(encoding="utf-8")))
+    return by
+
+
+def cmd_revise_report(args) -> None:
+    """PLAN v3: bugs fixed, wrong edits and declines per input; C5 against N1 (decides only in R2)."""
+    by = _revise_records(args)
+    if not by:
+        sys.exit("no scored reviser runs; run revise-score first")
+    print("| Input | Runs (ok) | PRs | Bugs fixed per PR | Fix rate | Wrong edits per PR "
+          "| Bugs: reverted / judged (fixed) / untouched | Rule issues reverted per run | Lines changed per run | Cost per run |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
+    for inp in revision.INPUTS:
+        if inp not in by:
+            continue
+        s = revision.summary(by[inp])
+        d = s["decided"]
+        print(f"| {inp} | {s['runs']} ({s['ok']}) | {s['prs']} | {s['bugs_fixed_per_pr']:.2f} | {s['fix_rate']:.1%} "
+              f"| {s['wrong_edits_per_pr']:.2f} | {d['reverted']} / {d['judged']} ({s['judged_fixed']}) / {d['untouched']} "
+              f"| {s['rules_reverted_per_run']:.2f} | {s['lines_per_run']:.1f} | ${s['cost_per_run']:.3f} |")
+    print("\nFindings by label (from the key) and the reviser's action:\n")
+    print("| Input | Label | Fixed | Declined | Declined share |")
+    print("|---|---|---|---|---|")
+    for inp in revision.INPUTS:
+        for label, c in sorted(revision.summary(by.get(inp, [])).get("findings", {}).items()):
+            n = c["fixed"] + c["declined"]
+            print(f"| {inp} | {label} | {c['fixed']} | {c['declined']} | {c['declined'] / n:.0%} |")
+    if "C5" in by and "N1" in by:
+        r = revision.decide(by["C5"], by["N1"], args.bootstrap)
+        dl = r["delta_wrong_edits"]
+        print(f"\nC5 - N1, wrong edits per PR: {dl['point']:+.2f} (95% CI {dl['ci95'][0]:+.2f} to {dl['ci95'][1]:+.2f}), "
+              f"{dl['prs']} PRs. Bugs fixed per PR: C5 {r['fixed_c5']:.2f}, N1 {r['fixed_n1']:.2f} "
+              f"({r['fixed_ratio']:.0%}; needed 90%).")
+        if args.split == "test":
+            print(f"\n**R2: {r['verdict']}**")
+        else:
+            print("\nDevelopment PRs: exploratory, decides nothing (PLAN v3, R1).")
+
+
+def cmd_revise_check(args) -> None:
+    """PLAN v3, 6: Jim's blind check of the fix judge. `sample` writes the pairs; `score` compares."""
+    if args.action == "sample":
+        records = [r for rs in _revise_records(args).values() for r in rs]
+        n = revision.sample_check(records, args.n, Path(args.file))
+        print(f"{n} judged bugs in {args.file}; answer the last column yes or no. Don't open the .key.csv beside it.")
+    else:
+        r = revision.check_agreement(Path(args.file))
+        print(f"{r['same']} of {r['answered']} answered pairs agree ({r['agreement']:.1%}; needed 85%); "
+              f"{r['pairs'] - r['answered']} unanswered.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -635,6 +744,26 @@ def main() -> None:
     ri.add_argument("--repeats", type=int, default=2, help="revision repeats; N1 repeat k uses run k")
     ri.add_argument("--profile", choices=["strict", "core", "all"], default="core")
     ri.add_argument("--pack", help="also zip the findings files (no keys) to this path, for account B")
+    for name, help_ in (("revise-score", "PLAN v3: score the reviser's runs, with the fix judge"),
+                        ("revise-report", "PLAN v3: bugs fixed, wrong edits and declines per input"),
+                        ("revise-check", "PLAN v3: Jim's blind check of the fix judge")):
+        rs = sub.add_parser(name, help=help_)
+        rs.add_argument("--dataset", default="qodo")
+        rs.add_argument("--judge", required=True)
+        rs.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+        rs.add_argument("--release", help="why test PRs are being scored; required for test or all (PLAN 6.6)")
+        rs.add_argument("--inputs", default="N1,C5,G")
+        if name == "revise-score":
+            rs.add_argument("--force", action="store_true", help="score again even if the record exists")
+            rs.add_argument("--concurrency", type=int, default=1, help="calls in flight at once")
+            rs.add_argument("--rate", type=float, default=10.0, help="most calls started per minute")
+            rs.add_argument("--max-wait", type=float, default=180, help="minutes to wait out a busy endpoint")
+        if name == "revise-report":
+            rs.add_argument("--bootstrap", type=int, default=2000)
+        if name == "revise-check":
+            rs.add_argument("action", choices=["sample", "score"])
+            rs.add_argument("--file", required=True, help="the CSV to write (sample) or Jim's answered CSV (score)")
+            rs.add_argument("--n", type=int, default=40)
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
@@ -646,10 +775,13 @@ def main() -> None:
         cmd_gate1b(args)
     elif args.cmd == "gate1":
         cmd_gate1(args)
+    elif args.cmd == "revise-score":
+        asyncio.run(cmd_revise_score(args))
     else:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
          "gate3": cmd_gate3, "gate4": cmd_gate4, "consensus-match": cmd_consensus_match,
-         "consensus": cmd_consensus, "revise-inputs": cmd_revise_inputs}[args.cmd](args)
+         "consensus": cmd_consensus, "revise-inputs": cmd_revise_inputs,
+         "revise-report": cmd_revise_report, "revise-check": cmd_revise_check}[args.cmd](args)
 
 
 if __name__ == "__main__":

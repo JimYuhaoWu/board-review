@@ -801,6 +801,62 @@ def test_revision_blocks_on_target_reverted_and_bug_location():
     assert [hunks.reverted(b, clean) for b in inj] == [True, False]
 
 
+def _planted():
+    from eval.scoring import hunks
+    inj = hunks.parse_patch("s.py", "@@ -10,1 +10,1 @@\n-ok = x\n+ok = y\n@@ -40,0 +41,1 @@\n+bad()")
+    golden = [{"comment": "Wrong value (s.py:10)", "category": "bug"},
+              {"comment": "Bad call (s.py:41)", "category": "bug"},
+              {"comment": "Somewhere, no place given", "category": "bug"},
+              {"comment": "Style rule (s.py:41)", "category": "rule"}]
+    return inj, golden
+
+
+def test_bug_decisions_reverted_untouched_and_judged():
+    from eval.scoring import hunks, revision
+    inj, golden = _planted()
+    # the revision restores line 10 and edits line 41 in a new way; head^ -> revised still differs at 41
+    rev = hunks.parse_diff("--- a/s.py\n+++ b/s.py\n@@ -10 +10 @@\n-ok = y\n+ok = x\n@@ -41 +41 @@\n-bad()\n+good()")
+    clean = hunks.parse_diff("--- a/s.py\n+++ b/s.py\n@@ -40,0 +41 @@\n+good()")
+    qs = revision.bug_questions(golden, inj, rev, clean)
+    assert [(q["status"], q["fixed"]) for q in qs] == [("reverted", True), ("judged", None), ("judged", None)]
+    assert "+good()" in qs[1]["edits"] and "+bad()" in qs[1]["planted"] and qs[1]["prompt"].count("Bad call") == 1
+    assert qs[2]["planted"] == "(none)" and "ok = x" in qs[2]["edits"], "no location: all edits shown"
+    assert [q["status"] for q in revision.bug_questions(golden, inj, [], inj)] == ["untouched"] * 3
+    assert [q["golden"] for q in revision.bug_questions(golden, inj, rev, clean, "rule")] == [3]
+
+
+def test_revision_decision_and_blind_check(tmp_path):
+    from eval.scoring import revision
+
+    def rec(pid, fixed, wrong, judged=False):
+        bugs = [{"status": "judged" if judged else "reverted", "fixed": f, "golden": i, "comment": f"bug {i}",
+                 "planted": "+x", "edits": "-x"} for i, f in enumerate(fixed)]
+        return {"pr_id": pid, "status": "ok", "bugs": bugs, "edits": {"wrong": wrong, "lines": 2},
+                "rules": [], "findings": [], "cost_usd": 0.1, "input": "N1", "repeat": 1}
+
+    n1 = [rec(f"p{i}", [True, True], 3) for i in range(8)]
+    c5 = [rec(f"p{i}", [True, i % 4 != 0], 0) for i in range(8)]
+    r = revision.decide(c5, n1, n_boot=200)
+    assert r["delta_wrong_edits"]["point"] == -3 and r["fixed_ratio"] == 0.875 and r["verdict"] == "FAIL"
+    assert revision.decide([rec(f"p{i}", [True, True], 1) for i in range(8)], n1, n_boot=200)["verdict"] == "PASS"
+    assert revision.summary(c5)["bugs_fixed_per_pr"] == 1.75
+
+    judged = [rec(f"p{i}", [i % 2 == 0], 0, judged=True) for i in range(5)]
+    out = tmp_path / "check.csv"
+    assert revision.sample_check(judged, 4, out) == 4
+    import csv
+    rows = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    assert set(rows[0]) == set(revision.CHECK_FIELDS) and not any("True" in str(v) for row in rows for v in row.values())
+    key = {row["pair"]: row["judge_fixed"] for row in csv.DictReader(open(tmp_path / "check.key.csv", encoding="utf-8"))}
+    for row in rows:
+        row["fixed (yes/no)"] = "yes" if key[row["pair"]] == "True" else "no"
+    rows[0]["fixed (yes/no)"] = "no" if rows[0]["fixed (yes/no)"] == "yes" else "yes"
+    rows[1]["fixed (yes/no)"] = ""
+    with open(out, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=revision.CHECK_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+    assert revision.check_agreement(out) == {"pairs": 4, "answered": 3, "same": 2, "agreement": 2 / 3}
 def test_revise_files_are_written_with_lf(tmp_path, monkeypatch):
     """Account B hashes the findings file's bytes (input_sha256), so they must not depend on the OS."""
     monkeypatch.setattr(revise, "RESULTS", tmp_path)

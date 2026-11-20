@@ -253,6 +253,17 @@ class JudgeModel:
             return [[i] for i in range(len(texts))], True
         return result["groups"], False
 
+    async def fix(self, prompt: str) -> dict:
+        """PLAN v3's fix judge: does a revision fix a planted bug (eval/scoring/revision.py)."""
+
+        async def call():
+            result = await self.judge.call_llm(prompt)
+            if not isinstance(result.get("fixed"), bool) and not result.get("error"):
+                return {"error": f"fix judge answer has no boolean 'fixed': {result}"}
+            return result
+
+        return await self._cached("fix", prompt, call)
+
     async def match(self, golden: str, candidate: str) -> dict:
         """Martian step 3 for one (golden comment, candidate) pair."""
         prompt = m3.JUDGE_PROMPT.format(golden_comment=golden, candidate=candidate)
