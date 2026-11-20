@@ -89,7 +89,8 @@ class ExpectedSetup(BaseModel):
     version: str
     model: str
     tools: list[str]
-    plugin: str = "board-review"
+    # None: the session must load no plugin (native /code-review).
+    plugin: str | None = "board-review"
 
 
 def setup_problems(init: InitInfo, expected: ExpectedSetup) -> list[str]:
@@ -102,13 +103,14 @@ def setup_problems(init: InitInfo, expected: ExpectedSetup) -> list[str]:
         problems.append(f"tools {sorted(init.tools)}, expected {sorted(expected.tools)}")
     if init.mcp_servers:
         problems.append(f"MCP servers loaded: {init.mcp_servers}")
-    extra_plugins = [p for p in init.plugins if not p.endswith("@builtin") and not p.startswith(f"{expected.plugin}@")]
+    ours = (lambda p: p.startswith(f"{expected.plugin}@")) if expected.plugin else (lambda p: False)
+    extra_plugins = [p for p in init.plugins if not p.endswith("@builtin") and not ours(p)]
     if extra_plugins:
         problems.append(f"plugins loaded: {extra_plugins}")
-    if not any(p.startswith(f"{expected.plugin}@") for p in init.plugins):
+    if expected.plugin and not any(ours(p) for p in init.plugins):
         problems.append(f"plugin {expected.plugin} not loaded")
     # Built-in skills have bare names; plugin and synced skills are namespaced.
-    extra_skills = [s for s in init.skills if ":" in s and not s.startswith(f"{expected.plugin}:")]
+    extra_skills = [s for s in init.skills if ":" in s and not (expected.plugin and s.startswith(f"{expected.plugin}:"))]
     if extra_skills:
         problems.append(f"skills loaded: {extra_skills}")
     return problems
