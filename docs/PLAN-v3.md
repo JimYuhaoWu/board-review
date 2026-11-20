@@ -62,7 +62,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
   - planted rule issues fixed (the All profile);
   - lines changed;
   - the cost per PR of review plus revision;
-  - the reviser's declines by finding label.
+  - the reviser's action on each finding by its label (true, other, false): a fixed false finding is a wrong edit even when it lands within 3 lines of an injected block, where the hunk count misses it (smoke test, prefect-1).
 
 ## 7. Phases
 
