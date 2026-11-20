@@ -16,6 +16,8 @@ Usage (from the repo root, after `uv sync`):
         --repeat N                                                                            # Gate 4, B2
     uv run python -m eval.runner run --variant code-review --level L --results-dir DIR (--prs IDS | --set S) \
         --repeat N                                                                            # PLAN-v2 modes
+    uv run python -m eval.runner run --variant revise --input N1|C5|G --dataset-dir eval/datasets/qodo \\
+        (--prs IDS | --set S) --repeat N                                                      # PLAN v3, Y15
     uv run python -m eval.runner run --variant V --smoke-repo DIR --base SHA --head SHA \\
         --repeat N [--members IDS] [--intent-file FILE]                                       # mechanics test
     uv run python -m eval.runner pack --variant V [--members ID] (--prs IDS | --set S) --repeat N   # zip for judging
@@ -33,6 +35,10 @@ A `board-cr` run (PLAN Phase 3, Gate 3) runs `/code-review`, then the full board
 as the extra member `code-review`. A `board-none` run (Gate 4, B1) is the same with no members.
 `--members default` runs the default roster into `board-default`, on any PRs. `--variant both`
 stays `code-review` and `board-full`.
+
+A `revise` run (PLAN v3) edits the PR from a findings file, into the variant folder `revise-<input>`.
+It reads `<findings-dir>/<dataset>/revise-inputs/<pr_id>/<input>-r<repeat>.json`, the files account A
+sends (default --findings-dir: eval/results), or --findings-file with --smoke-repo.
 
 Repositories go to --data-dir, outside this repository, so a reviewer working in them can't read
 the golden comments. The default is $BOARD_EVAL_DATA, or ~/board-review-data.
@@ -52,9 +58,10 @@ from pathlib import Path
 from eval.runner import martian, qodo
 from eval.runner.pack import pack_runs
 from eval.runner.records import DATASET_DIR, ROOT, PullRequest, read_jsonl, write_jsonl
+from eval.runner.revise import INPUTS, load_findings
 from eval.runner.run import (
-    BOARD_CR, BOARD_NONE, LEVEL, LEVELS, PLUGIN_DIR, TWO_SESSION, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done, run_name,
-    run_one, stale_reason,
+    BOARD_CR, BOARD_NONE, LEVEL, LEVELS, PLUGIN_DIR, REVISE, TWO_SESSION, VARIANTS, Paths, RunSpec, cache_clash, check_claude, command_for, is_done,
+    is_revise, run_name, run_one, stale_reason,
 )
 from eval.runner.split import SEED, Split, drawn_before, make_draw, make_split, write_frozen
 
@@ -121,7 +128,10 @@ def _add_dataset(p: argparse.ArgumentParser) -> None:
 
 def _add_selection(p: argparse.ArgumentParser) -> None:
     """Which runs: the variant, the PRs, and the repeat. Shared by `run` and `pack`."""
-    p.add_argument("--variant", choices=[*VARIANTS, *TWO_SESSION, "both"], required=True)
+    p.add_argument("--variant", choices=[*VARIANTS, *TWO_SESSION, REVISE, "both"], required=True)
+    p.add_argument("--input", choices=INPUTS, help="the reviser's findings: N1, C5 or G (with --variant revise)")
+    p.add_argument("--findings-dir", type=Path, default=ROOT / "eval" / "results", help="holds <dataset>/revise-inputs/")
+    p.add_argument("--findings-file", type=Path, help="the reviser's findings file, with --smoke-repo")
     p.add_argument("--repeat", type=int, required=True)
     which = p.add_mutually_exclusive_group(required=True)
     which.add_argument("--prs", help="comma-separated PR ids")
@@ -212,6 +222,14 @@ def _draw(args: argparse.Namespace) -> int:
 
 def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
     variants = VARIANTS if args.variant == "both" else (args.variant,)
+    if (args.variant == REVISE) != bool(args.input):
+        raise SystemExit("--variant revise needs --input, and --input is for revise runs only")
+    if args.variant == REVISE:
+        if args.members != "full":
+            raise SystemExit("revise runs have no roster; leave out --members")
+        if bool(args.findings_file) != bool(args.smoke_repo):
+            raise SystemExit("--findings-file goes with --smoke-repo; benchmark PRs read --findings-dir")
+        variants = (f"{REVISE}-{args.input}",)
     if args.level != LEVEL:
         if args.variant != "code-review":
             raise SystemExit("--level is for code-review runs")
@@ -253,10 +271,17 @@ def _run_specs(args: argparse.Namespace) -> list[RunSpec]:
             (dataset, i, args.data_dir.resolve() / "prs" / f"{i}.git", prs[i].base, prs[i].head, prs[i].intent)
             for i in ids
         ]
+    def findings_file(dataset: str, pr_id: str) -> Path | None:
+        if args.variant != REVISE:
+            return None
+        if args.findings_file:
+            return args.findings_file.resolve()
+        return args.findings_dir.resolve() / dataset / "revise-inputs" / pr_id / f"{args.input}-r{args.repeat}.json"
+
     return [
         RunSpec(
             dataset=d, pr_id=i, variant=v, repeat=args.repeat, repo=repo, base=base, head=head,
-            members=members, intent=intent, level=args.level,
+            members=members, intent=intent, level=args.level, findings_file=findings_file(d, i),
         )
         for d, i, repo, base, head, intent in targets
         for v in variants
@@ -290,8 +315,8 @@ def _run(args: argparse.Namespace) -> int:
         for spec in specs:
             state = _refusal(paths, spec) or ("done" if is_done(paths, spec) else "to run")
             print(f"{run_name(spec)} ({state}) in {spec.repo}")
-            intent_file = Path("<intent-file>") if spec.intent and spec.variant.startswith("board-") else None
-            extra_file = None
+            intent_file = Path("<intent-file>") if spec.intent and spec.variant.startswith(("board-", REVISE)) else None
+            extra_file = Path("<findings-file>") if is_revise(spec) else None
             if spec.variant in TWO_SESSION:
                 review = spec.model_copy(update={"variant": "code-review"})
                 print("  " + " ".join(command_for(review, paths.claude)[1:]))
@@ -320,6 +345,11 @@ def _run(args: argparse.Namespace) -> int:
 
 def _refusal(paths: Paths, spec: RunSpec) -> str | None:
     """Why this run can't go ahead as it stands, or None."""
+    if is_revise(spec):
+        try:
+            load_findings(spec.findings_file, spec.dataset, spec.pr_id, spec.variant.removeprefix(f"{REVISE}-"), spec.repeat)
+        except (OSError, ValueError) as e:
+            return f"findings file: {e}"
     if reason := stale_reason(paths, spec):
         return f"finished with an older plugin ({reason}); move it aside, for example into eval/results/superseded/"
     if not is_done(paths, spec) and (source := cache_clash(paths, spec)):

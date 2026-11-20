@@ -34,7 +34,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from eval.runner import gitrepo
+from eval.runner import gitrepo, revise
 from eval.runner.records import ROOT
 from eval.runner.stream import ExpectedSetup, InitInfo, ResultInfo, parse_board_json, setup_problems
 from eval.scoring.data import EXTRA_MEMBER, code_review_member_output
@@ -60,6 +60,13 @@ ALLOWED_TOOLS = [
     *[f"Bash({c} *)" for c in _READ_ONLY_COMMANDS],
 ]
 DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"]
+# The reviser (PLAN v3, 3) edits files; it gets /code-review's read-only git commands and no subagents.
+REVISE = "revise"
+REVISE_TOOLS = ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
+REVISE_ALLOWED_TOOLS = [
+    "Read", "Grep", "Glob", "Edit", "Write", "Bash(ls)", *[f"Bash({c} *)" for c in _READ_ONLY_COMMANDS],
+]
+REVISE_DISALLOWED_TOOLS = ["NotebookEdit", "WebFetch", "WebSearch"]
 RUN_TIMEOUT_S = 2 * 60 * 60
 PLUGIN_DIR = ROOT / "plugin"
 SKILL_FILES = {
@@ -85,6 +92,8 @@ class RunSpec(BaseModel):
     level: str = LEVEL
     members: str = "full"
     intent: str = ""
+    # revise-<input> runs: the input's findings file (TASKS, "Revision inputs").
+    findings_file: Path | None = None
 
 
 class Paths(BaseModel):
@@ -130,6 +139,8 @@ class RunMeta(BaseModel):
     # and the hash and size of the extra-findings file the board read.
     sessions: dict[str, dict[str, Any]] = {}
     extra_findings: dict[str, Any] | None = None
+    # revise-<input> runs: the input, the prompt and findings-file hashes, and the report's counts.
+    revise: dict[str, Any] | None = None
 
 
 def run_name(spec: RunSpec) -> str:
@@ -202,6 +213,8 @@ def prompt_for(spec: RunSpec, intent_file: Path | None, extra_file: Path | None 
     if spec.variant == "code-review":
         prompt = f"/code-review {spec.level} --max-findings all {target}"
         return f"{prompt}\n\n{spec.intent}" if spec.intent else prompt
+    if is_revise(spec):
+        return revise.prompt(intent_file, extra_file)
     if spec.variant.startswith("board-"):
         # A file, because PR descriptions can contain `--flags` that --intent would misparse.
         intent = f"--intent-file {intent_file.as_posix()} " if intent_file else ""
@@ -213,12 +226,17 @@ def prompt_for(spec: RunSpec, intent_file: Path | None, extra_file: Path | None 
 def loads_board(spec: RunSpec) -> bool:
     # Native /code-review runs without the board: at levels that start reviewer subagents, it would
     # pick the board's member and verifier agents (Y13, max on ghost-2).
-    return spec.variant != "code-review"
+    return spec.variant.startswith("board-")
+
+
+def is_revise(spec: RunSpec) -> bool:
+    return spec.variant.startswith(f"{REVISE}-")
 
 
 def expected_setup(spec: RunSpec) -> ExpectedSetup:
     return ExpectedSetup(
-        version=PINNED_VERSION, model=spec.model, tools=TOOLS, plugin="board-review" if loads_board(spec) else None
+        version=PINNED_VERSION, model=spec.model, tools=REVISE_TOOLS if is_revise(spec) else TOOLS,
+        plugin="board-review" if loads_board(spec) else None,
     )
 
 
@@ -226,6 +244,7 @@ def command_for(
     spec: RunSpec, claude: str, intent_file: Path | None = None, plugin_dir: Path = PLUGIN_DIR,
     extra_file: Path | None = None,
 ) -> list[str]:
+    """`extra_file` is the board's extra findings, or the reviser's findings file."""
     # The input files live outside the worktree, so the reviewers need read access to their folders.
     folders = dict.fromkeys(str(f.parent) for f in (intent_file, extra_file) if f)
     add_dir = [arg for folder in folders for arg in ("--add-dir", folder)]
@@ -240,9 +259,9 @@ def command_for(
         # Ignore a benchmark repo's own .claude/settings.json (hooks) and .mcp.json.
         "--setting-sources", "user",
         "--strict-mcp-config",
-        "--tools", ",".join(TOOLS),
-        "--allowedTools", *ALLOWED_TOOLS,
-        "--disallowedTools", *DISALLOWED_TOOLS,
+        "--tools", ",".join(REVISE_TOOLS if is_revise(spec) else TOOLS),
+        "--allowedTools", *(REVISE_ALLOWED_TOOLS if is_revise(spec) else ALLOWED_TOOLS),
+        "--disallowedTools", *(REVISE_DISALLOWED_TOOLS if is_revise(spec) else DISALLOWED_TOOLS),
         "--permission-mode", "dontAsk",
         "--no-session-persistence",
     ]
@@ -355,6 +374,8 @@ def run_one(spec: RunSpec, paths: Paths, account: str) -> RunMeta:
     run_work = paths.work / spec.dataset / spec.variant / spec.pr_id
     if spec.variant in TWO_SESSION:
         meta = _run_board_cr(spec, paths, account, out, run_work)
+    elif is_revise(spec):
+        meta = _revise_session(spec, paths, account, out)
     else:
         meta = _session(spec, paths, account, out, run_work)
         if meta.status == "ok" and writes_cache(spec):
@@ -412,7 +433,6 @@ def _session(
     spec: RunSpec, paths: Paths, account: str, out: Path, run_work: Path, extra_findings: str | None = None
 ) -> RunMeta:
     """One `claude -p` session: its files go to `out`, its worktree and input files under `run_work`."""
-    hashes = skill_hashes()
     inputs = run_work / f"r{spec.repeat}-intent"
     intent_file = inputs / "intent.txt" if spec.intent and spec.variant.startswith("board-") else None
     extra_file = inputs / "extra-findings.json" if extra_findings is not None else None
@@ -423,7 +443,26 @@ def _session(
     if extra_file:
         extra_file.write_text(extra_findings, encoding="utf-8", newline="\n")
     command = command_for(spec, paths.claude, intent_file, plugin_snapshot(paths.work), extra_file)
-    meta = RunMeta(
+    meta = _new_meta(spec, account, command)
+    worktree = run_work / f"r{spec.repeat}"
+    started = time.monotonic()
+    _add_worktree(spec.repo, worktree, spec.head)
+    try:
+        init, result = _stream(command, worktree, paths.config_dir, out, spec)
+    finally:
+        _remove_worktree(spec.repo, worktree)
+        if intent_file or extra_file:
+            shutil.rmtree(inputs, ignore_errors=True)
+    meta.wall_seconds = round(time.monotonic() - started, 1)
+    meta.setup = init
+    meta.claude_code_version = init.version if init else None
+    _finish(meta, init, result, out, spec)
+    return meta
+
+
+def _new_meta(spec: RunSpec, account: str, command: list[str]) -> RunMeta:
+    hashes = skill_hashes()
+    return RunMeta(
         dataset=spec.dataset,
         dataset_commit=_dataset_commit(),
         pr_id=spec.pr_id,
@@ -441,19 +480,43 @@ def _session(
         command=command[1:],
         started_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     )
-    worktree = run_work / f"r{spec.repeat}"
+
+
+def _revise_session(spec: RunSpec, paths: Paths, account: str, out: Path) -> RunMeta:
+    """One reviser session (PLAN v3, 3) in a squashed clone; then its diffs and report."""
+    input_ = spec.variant.removeprefix(f"{REVISE}-")
+    findings = revise.load_findings(spec.findings_file, spec.dataset, spec.pr_id, input_, spec.repeat)
+    text = revise.neutral_findings(findings)
+    # Paths the reviser sees name neither the input nor the repeat.
+    token = hashlib.sha256(run_name(spec).encode()).hexdigest()[:10]
+    run_work = paths.work / spec.dataset / REVISE / spec.pr_id / token
+    revise.remove_tree(run_work)
+    inputs, clone = run_work / "inputs", run_work / "repo"
+    inputs.mkdir(parents=True)
+    intent_file = inputs / "intent.txt" if spec.intent else None
+    if intent_file:
+        intent_file.write_text(spec.intent, encoding="utf-8", newline="\n")
+    findings_file = inputs / "findings.json"
+    findings_file.write_text(text, encoding="utf-8", newline="\n")
+    command = command_for(spec, paths.claude, intent_file, extra_file=findings_file)
+    meta = _new_meta(spec, account, command)
+    meta.revise = {
+        "input": input_, "prompt_sha256": revise.PROMPT_SHA256,
+        "findings_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12], "findings": len(findings),
+    }
     started = time.monotonic()
-    _add_worktree(spec.repo, worktree, spec.head)
     try:
-        init, result = _stream(command, worktree, paths.config_dir, out, spec)
+        revise.make_clone(spec.repo, spec.base, spec.head, clone)
+        init, result = _stream(command, clone, paths.config_dir, out, spec)
+        revision = revise.revision_diff(clone)
+        (out / "revision.diff").write_bytes(revision)
+        (out / "vs-clean.diff").write_bytes(revise.vs_clean_diff(spec.repo, spec.head, revision, run_work / "scratch"))
     finally:
-        _remove_worktree(spec.repo, worktree)
-        if intent_file or extra_file:
-            shutil.rmtree(inputs, ignore_errors=True)
+        revise.remove_tree(run_work)
     meta.wall_seconds = round(time.monotonic() - started, 1)
     meta.setup = init
     meta.claude_code_version = init.version if init else None
-    _finish(meta, init, result, out, spec)
+    _finish(meta, init, result, out, spec, ids=[f["id"] for f in findings])
     return meta
 
 
@@ -513,7 +576,10 @@ def _json_or_none(line: str) -> dict[str, Any] | None:
     return event if isinstance(event, dict) else None
 
 
-def _finish(meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out: Path, spec: RunSpec) -> None:
+def _finish(
+    meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out: Path, spec: RunSpec,
+    ids: list[str] | None = None,
+) -> None:
     expected = expected_setup(spec)
     if init is None:
         meta.status, meta.detail = "failed:no-init", "the run printed no init event; see stderr.txt"
@@ -540,6 +606,19 @@ def _finish(meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out
         return
     if spec.variant == "code-review":
         (out / "final.md").write_text(result.text, encoding="utf-8", newline="\n")
+        meta.status = "ok"
+        return
+    if is_revise(spec):
+        try:
+            report, repair = revise.parse_report(result.text, ids or [])
+        except ValueError as e:
+            (out / "report.raw.txt").write_text(result.text, encoding="utf-8", newline="\n")
+            meta.status, meta.detail = "failed:bad-report", str(e)[:300]
+            return
+        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        meta.parse_repair = repair
+        actions = [e["action"] for e in report["findings"]]
+        meta.revise = {**(meta.revise or {}), **{a: actions.count(a) for a in revise.ACTIONS}}
         meta.status = "ok"
         return
     try:
