@@ -764,3 +764,38 @@ def test_revise_inputs_hide_the_labels_and_follow_the_add_on():
         assert [f["id"] for f in doc["findings"]] == [f"F{i + 1}" for i in range(len(doc["findings"]))]
     with pytest.raises(ValueError, match="no run 3"):
         revise.build(rec, 3)
+def test_blocks_split_hunks_at_context_and_place_insertions():
+    from eval.scoring import hunks
+    two = hunks.parse_patch("f.py", "@@ -1,7 +1,7 @@\n a\n-b\n+B\n c\n d\n-e\n+E\n f")
+    assert [(b.old, b.new, b.removed, b.added) for b in two] == [((2, 2), (2, 2), ("b",), ("B",)),
+                                                                 ((5, 5), (5, 5), ("e",), ("E",))]
+    ins = hunks.parse_patch("f.py", "@@ -3,0 +4,2 @@\n+x\n+y")[0]
+    assert (ins.old, ins.new) == ((4, 3), (4, 5))
+    assert hunks.overlaps(ins.old, (3, 3)) and hunks.overlaps(ins.old, (4, 9)) and not hunks.overlaps(ins.old, (5, 9))
+
+
+def test_parse_diff_reads_git_headers_new_renamed_and_deleted_files():
+    from eval.scoring import hunks
+    text = "\n".join([
+        "diff --git a/new.py b/new.py", "new file mode 100644", "--- /dev/null", "+++ b/new.py", "@@ -0,0 +1,2 @@", "+a", "+b",
+        "diff --git a/old.py b/moved.py", "--- a/old.py", "+++ b/moved.py", "@@ -2,1 +2,1 @@", "-x", "+y",
+        "diff --git a/gone.py b/gone.py", "--- a/gone.py", "+++ /dev/null", "@@ -1 +0,0 @@", "-z",
+        "diff --git a/img.png b/img.png", "Binary files a/img.png and b/img.png differ"])
+    got = [(b.path, b.old, b.new) for b in hunks.parse_diff(text)]
+    assert got == [("new.py", (1, 0), (1, 2)), ("moved.py", (2, 2), (2, 2)), ("gone.py", (1, 1), (1, 0))]
+
+
+def test_revision_blocks_on_target_reverted_and_bug_location():
+    from eval.scoring import hunks
+    # head^ -> head: line 10 changed, and 2 lines inserted after line 40 (head lines 41-42)
+    inj = hunks.parse_patch("s.py", "@@ -10,1 +10,1 @@\n-ok = x\n+ok = y\n@@ -40,0 +41,2 @@\n+bad()\n+bad()")
+    assert hunks.location("Wrong value. desc (s.py:10-11)") == ("s.py", 10, 11)
+    assert hunks.location("no place given") is None
+    assert hunks.bug_blocks("Wrong value (s.py:10)", inj) == [inj[0]]
+    assert hunks.bug_blocks("Elsewhere (t.py:10)", inj) == []
+    # head -> revised: fixes line 10, and edits line 80, far from any injection block
+    rev = hunks.parse_diff("--- a/s.py\n+++ b/s.py\n@@ -10 +10 @@\n-ok = y\n+ok = x\n@@ -80 +80 @@\n-p\n+q")
+    assert [hunks.on_target(b, inj) for b in rev] == [True, False]
+    # head^ -> revised: only line 80 and the inserted calls still differ from the clean file
+    clean = hunks.parse_diff("--- a/s.py\n+++ b/s.py\n@@ -40,0 +41,2 @@\n+bad()\n+bad()\n@@ -78 +80 @@\n-p\n+q")
+    assert [hunks.reverted(b, clean) for b in inj] == [True, False]

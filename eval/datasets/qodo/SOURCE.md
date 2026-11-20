@@ -26,6 +26,10 @@ Every PR has 2 to 5 functional bugs (3.1 on average) and 5.8 issues in all.
 
 **The rules are in the repositories.** In every fork, a commit by Qodo ("Add AGENTS.md with compliance rules for PR analysis") replaced `AGENTS.md` with the mined rules, in the base commit. In Ghost, cal.com and dify, `CLAUDE.md` holds the same rules too. Neither file is loaded automatically: the runner's `--setting-sources user` keeps `CLAUDE.md` out, and Claude Code doesn't load `AGENTS.md`. But a reviewer can open them, and `/code-review` looks for `CLAUDE.md`. So rule recall partly measures whether a variant reads these files. That is one more reason the Core profile, which decides the gate, leaves rule violations out. They also favour a style-minded member. Every PR records the files in `agent_files`.
 
+## The injection commit (PLAN v3)
+
+`injection.jsonl`: one row per PR with `head`, its parent, and the injection commit's files (`path`, `old_path`, `status`, `patch`), from the GitHub API (`repos/<fork>/commits/<head>`) on 2026-11-20. All 100 heads are a single-parent commit "update pr", and no patch was truncated (232 files). `eval/scoring/hunks.py` reads it. Of the 309 functional bugs, 269 point at an injected block (same file, within 3 lines), 37 give no file or lines, and 3 (all in tauri-5) point at files the injection didn't touch.
+
 ## Known leaks, out of reach of the reviewers
 
 - Five Ghost PRs (1, 2, 3, 4, 8) carry a July 2026 comment from an outside account that lists the injected issues as "resolved".

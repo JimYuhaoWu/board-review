@@ -31,6 +31,7 @@ Martian's bugs are historical, with no clean reference commit, so v3 uses **Qodo
   - **The edits:** `git diff` of the worktree against `head`.
   - **A report:** one line per finding, `fixed` or `declined` with a reason.
 - **The reviser may decline a finding it judges wrong.** Declining is the cheapest filter a fully automated pipeline has, and v3 measures how well it works (question 3). Decided: yes (Jim, 2026-11-20).
+- **No clean history.** The reviser's repository holds base → head as one commit, so `head^`, the answer, is out of reach (TASKS, "The reviser (Y15)"). Review runs had the full history; 2 of the 216 Qodo `/code-review` runs looked at commit history, and neither read the injection commit's diff.
 - The prompt is fixed before R1 and may change only on development PRs (R1). It is frozen before R2.
 
 ## 4. Questions

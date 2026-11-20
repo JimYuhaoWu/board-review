@@ -62,7 +62,7 @@ eval/results/<dataset>/revise-keys/<pr_id>/<input>-r<repeat>.json       (account
 | J7 | **Gate 4 scoring:** views `board-none`, `board-default`, `code-review-b1` (B1's `/code-review` sessions judged alone); false positives per PR; `gate4` | ✅ 2026-11-07 |
 | J8 | **Gate 4 report**, with the format-slip normalization (#48) and the pipeline check | ✅ 2026-11-08: NO DECISION, the board project closes. Judge check not done (Jim) |
 | J9 | **PLAN v2, Phase B scoring** ([PLAN-v2.md](PLAN-v2.md)): the matching step (its own model), m-of-n scoring over every subset of k runs, the Phase B selection, and the figure of false positives against recall | ✅ 2026-11-18. 5 of 5 chosen; `eval/reports/phase-b.md` |
-| J10 | **PLAN v3, revision scoring** ([PLAN-v3.md](PLAN-v3.md), R0): the findings files for inputs N1, C5 and G (sent to account B); the injection diff (`head^..head`), hunk overlap, the exact-revert check and the fix judge; the scoring command, with tests | findings files ✅ 2026-11-20 (`revise-inputs`; 24 Qodo dev PRs × 3 inputs × 2 repeats; smoke pack for ghost-2 and prefect-1 sent); injection diff, fix judge and scoring ☐ |
+| J10 | **PLAN v3, revision scoring** ([PLAN-v3.md](PLAN-v3.md), R0): the findings files for inputs N1, C5 and G (sent to account B); the injection diff (`head^..head`), hunk overlap, the exact-revert check and the fix judge; the scoring command, with tests | findings files ✅ 2026-11-20 (`revise-inputs`; 24 Qodo dev PRs × 3 inputs × 2 repeats; smoke pack for ghost-2 and prefect-1 sent); injection diff and change blocks ✅ 2026-11-20 (`eval/datasets/qodo/injection.jsonl`, `eval/scoring/hunks.py`); fix judge and scoring ☐ |
 | J5 | **Member card and combined scoring** (PLAN 6.5, 6.7): the card in `python -m eval.scoring members`; scoring a single-member run (Y7) combined with the other members' findings from the full run. See "Testing one member" below | card ✅ (2026-11-04); combined scoring ☐, needs Y7 |
 
 Judging runs only on account A's machine, because the local endpoint key is personal.
@@ -82,7 +82,7 @@ Judging runs only on account A's machine, because the local endpoint key is pers
 | Y12 | **PLAN v2, Phase B runs**: native `/code-review medium` to k = 5 runs on the 24 Qodo and 15 Martian development PRs (r3–r5 where r1–r2 exist, r1–r5 on the 5 Martian PRs with none): 127 new runs | all `ok`, packed and sent | ✅ 2026-11-09, 127 runs, $6.78; all 195 Phase B runs `ok` at the same settings |
 | Y13 | **PLAN v2, mode smoke test**: one `/code-review` run at each of `low`, `high`, `xhigh`, `max` on 2 development PRs, to measure cost per mode for Phase C | costs reported | ✅ 2026-11-18. ghost-2 / sentry-93824 per run: low $0.02 / $0.05, high $0.07 / $0.12, xhigh $0.22 / $0.31 (39–148 s). `max` cut off at the 5-hour limit after $19.04 / $14.33 (20–22 min, 21 / 10 subagents), not rerun; the ghost-2 one used the board's agents, fixed in the runner |
 | Y14 | **PLAN v2, Phase C runs at `medium`**: 5 native `/code-review medium` runs on each of the 58 PRs in the two `phase-c.json` files, 290 runs. See "Phase C (Y14)" below | all `ok`, packed and sent | ☐ |
-| Y15 | **PLAN v3, the reviser** ([PLAN-v3.md](PLAN-v3.md), R0): a runner variant `revise` with `--input N1\|C5\|G` and `--findings-file`, in a fresh worktree at `head`, with Edit and Write allowed and no network or commit; it saves the worktree's `git diff` against `head` and the reviser's per-finding report. Smoke-test it on 2 development PRs with findings files from Jim | tests pass; the smoke test's cost per run is reported | ☐ |
+| Y15 | **PLAN v3, the reviser** ([PLAN-v3.md](PLAN-v3.md), R0): a runner variant `revise` with `--input N1\|C5\|G`, reading Jim's findings files ("Revision inputs" above). See "The reviser (Y15)" below | tests pass, including the clean-history check; the smoke test on ghost-2 and prefect-1 (3 inputs × 1 repeat) packed and sent, with its cost per run | ☐ |
 | Y6 | *Optional:* **Phase 4b**, stronger models for selected roles (PLAN Phase 4b) | the decision and its numbers, in `eval/reports/` | after Phase 4 |
 | Y8 | **Third pilot, the 12-member board** (PLAN Phase 3, Gate 2 v2). See "Third pilot" below | board r1 and r2 and `/code-review` r2 on the 10 pilot PRs, all `ok`, packed and sent | ✅ 2026-11-04, 40 runs. Gate 2 v2: FAIL |
 | Y9 | **Gate 2 on Qodo** (PLAN Phase 3). See "Qodo (Y9)" below | `prs.jsonl` and `split.json` for Qodo merged; board and `/code-review`, 2 repeats each, on the 24 sampled PRs, all `ok`, packed and sent | ✅ 2026-11-05, 96 runs. Gate 2 on Qodo: FAIL |
@@ -158,6 +158,42 @@ PLAN v2, Phase C, reduced to `medium` (2026-11-19). The add-on is frozen; these 
 **Don't open the PRs' GitHub pages or their comments** (Y9). **Don't score or read these runs' findings**: judging runs on account A.
 
 **Budget.** About $0.06 a run: about $16 for 290, one batch. If a usage stop comes first, run the same command again after the reset.
+
+## The reviser (Y15)
+
+PLAN v3, sections 3 and 7 (R0).
+
+1. **No clean history in the reviser's repository.**
+   - **The risk:** a Qodo PR's head is the upstream PR plus one commit that plants the issues. Its parent holds the clean file, which is the answer. The reviser may run read-only `git`, so with the PR's own history it could read that file with `git show HEAD~1:<file>`.
+   - **The fix:** give each run a repository whose history has no `head^`.
+     - In the PR's repository, make one commit with head's tree and the base as its only parent: `git commit-tree <head>^{tree} -p <base>`.
+     - Clone that commit alone: `git clone --no-local --depth 2 --branch <a temporary branch>`.
+     - The reviser then sees base → PR in one commit, and `HEAD~1` is the base.
+   - **Test:** in that clone, `git cat-file -e <head^>` must fail. Also check this on one real Qodo PR.
+2. **The session:**
+   - the review's model and effort (`claude-sonnet-5-5`, `medium`);
+   - tools: Read, Grep, Glob, Edit, Write, and the read-only `git` commands `/code-review` has;
+   - no network and no `git commit`; no board plugin.
+   - **Inputs:** the intent file and the findings file, both outside the repository.
+   - **The prompt:**
+     - The PR is `HEAD~1..HEAD`.
+     - Fix each finding you judge correct, with the smallest change.
+     - Decline any finding you judge wrong, and say why.
+     - Change nothing else.
+     - End with a JSON report: `{"findings": [{"id": "F1", "action": "fixed" | "declined", "reason": "..."}]}`, one entry per id in the file.
+   - **Freezing:** the prompt text is in the runner, recorded by hash in `meta.json`, and frozen after R1.
+3. **Outputs** in `eval/results/qodo/revise-<input>/<pr_id>/r<repeat>/`:
+   - `stream.jsonl`, `meta.json` and `stderr.txt`, as for other variants;
+   - `report.json`, the reviser's JSON report;
+   - `revision.diff`: `git add -A && git diff --cached HEAD` in the reviser's clone, which includes new files;
+   - `vs-clean.diff`: the revised tree against `head^`, computed in the PR's own repository after the session and outside the reviser's reach. One way: apply `revision.diff` to a worktree at head, then `git diff <head^>`.
+4. **Smoke test:**
+   - ghost-2 and prefect-1, inputs N1, C5 and G, repeat 1: 6 runs.
+   - Check that `report.json` has one entry per finding id, and that `vs-clean.diff` is empty outside the files the revision or the injection touched.
+   - Report the cost per run.
+   - Pack and send the runs.
+
+**Don't open the PRs' GitHub pages or their comments** (Y9).
 
 ## Testing one member (Y7 and J5)
 
