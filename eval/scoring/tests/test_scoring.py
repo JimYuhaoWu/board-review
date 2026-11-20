@@ -799,3 +799,12 @@ def test_revision_blocks_on_target_reverted_and_bug_location():
     # head^ -> revised: only line 80 and the inserted calls still differ from the clean file
     clean = hunks.parse_diff("--- a/s.py\n+++ b/s.py\n@@ -40,0 +41,2 @@\n+bad()\n+bad()\n@@ -78 +80 @@\n-p\n+q")
     assert [hunks.reverted(b, clean) for b in inj] == [True, False]
+
+
+def test_revise_files_are_written_with_lf(tmp_path, monkeypatch):
+    """Account B hashes the findings file's bytes (input_sha256), so they must not depend on the OS."""
+    monkeypatch.setattr(revise, "RESULTS", tmp_path)
+    revise.write("d", "p1", "N1", 1, {"findings": [{"id": "F1", "texts": ["a\nb"]}]}, {"findings": {}})
+    for kind in ("revise-inputs", "revise-keys"):
+        data = (tmp_path / "d" / kind / "p1" / "N1-r1.json").read_bytes()
+        assert b"\r\n" not in data and data.endswith(b"}\n")

@@ -101,7 +101,8 @@ def write(dataset: str, pr_id: str, name: str, repeat: int, findings: dict, key:
     for base, doc in ((inputs_dir(dataset), findings), (keys_dir(dataset), key)):
         path = base / pr_id / file_name(name, repeat)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+        # LF on every OS: account B hashes the findings file's bytes (input_sha256).
+        path.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
 
 
 def pack(dataset: str, pr_ids: list[str], zip_path: Path) -> int:
