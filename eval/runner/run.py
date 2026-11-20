@@ -210,6 +210,18 @@ def prompt_for(spec: RunSpec, intent_file: Path | None, extra_file: Path | None 
     raise ValueError(f"unknown variant {spec.variant}")
 
 
+def loads_board(spec: RunSpec) -> bool:
+    # Native /code-review runs without the board: at levels that start reviewer subagents, it would
+    # pick the board's member and verifier agents (Y13, max on ghost-2).
+    return spec.variant != "code-review"
+
+
+def expected_setup(spec: RunSpec) -> ExpectedSetup:
+    return ExpectedSetup(
+        version=PINNED_VERSION, model=spec.model, tools=TOOLS, plugin="board-review" if loads_board(spec) else None
+    )
+
+
 def command_for(
     spec: RunSpec, claude: str, intent_file: Path | None = None, plugin_dir: Path = PLUGIN_DIR,
     extra_file: Path | None = None,
@@ -217,9 +229,7 @@ def command_for(
     # The input files live outside the worktree, so the reviewers need read access to their folders.
     folders = dict.fromkeys(str(f.parent) for f in (intent_file, extra_file) if f)
     add_dir = [arg for folder in folders for arg in ("--add-dir", folder)]
-    # Native /code-review runs without the board: at levels that start reviewer subagents, it would
-    # pick the board's member and verifier agents (Y13, max on ghost-2).
-    plugin = [] if spec.variant == "code-review" else ["--plugin-dir", str(plugin_dir)]
+    plugin = ["--plugin-dir", str(plugin_dir)] if loads_board(spec) else []
     return [
         claude, "-p", prompt_for(spec, intent_file, extra_file),
         *add_dir,
@@ -465,7 +475,7 @@ def _remove_worktree(repo: Path, worktree: Path) -> None:
 def _stream(
     command: list[str], cwd: Path, config_dir: Path, out: Path, spec: RunSpec
 ) -> tuple[InitInfo | None, ResultInfo | None]:
-    expected = ExpectedSetup(version=PINNED_VERSION, model=spec.model, tools=TOOLS)
+    expected = expected_setup(spec)
     init = result = None
     with (out / "stream.jsonl").open("w", encoding="utf-8", newline="\n") as log, (out / "stderr.txt").open(
         "w", encoding="utf-8"
@@ -504,7 +514,7 @@ def _json_or_none(line: str) -> dict[str, Any] | None:
 
 
 def _finish(meta: RunMeta, init: InitInfo | None, result: ResultInfo | None, out: Path, spec: RunSpec) -> None:
-    expected = ExpectedSetup(version=PINNED_VERSION, model=spec.model, tools=TOOLS)
+    expected = expected_setup(spec)
     if init is None:
         meta.status, meta.detail = "failed:no-init", "the run printed no init event; see stderr.txt"
         return

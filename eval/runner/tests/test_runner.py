@@ -15,6 +15,9 @@ from eval.scoring.data import code_review_member_output
 EXPECTED = ExpectedSetup(version="2.1.317", model="claude-sonnet-5-5", tools=runner.TOOLS)
 
 
+NATIVE_PLUGINS = [{"name": "cc-plugin-telemetry", "source": "cc-plugin-telemetry@builtin"}]
+
+
 def _init_event(**overrides) -> dict:
     event = {
         "type": "system",
@@ -31,6 +34,11 @@ def _init_event(**overrides) -> dict:
     }
     event.update(overrides)
     return event
+
+
+def _native_init(**overrides) -> dict:
+    """A /code-review session's init: no board plugin since Y13."""
+    return _init_event(**{"plugins": NATIVE_PLUGINS, "skills": ["code-review", "debug"], **overrides})
 
 
 def test_clean_setup_has_no_problems():
@@ -274,7 +282,7 @@ def test_board_run_writes_layout_and_cache(tmp_path: Path, monkeypatch: pytest.M
 def test_usage_limit_is_never_an_empty_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo, stop: dict):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    _run_with(monkeypatch, [_init_event(), {"type": "result", **stop}])
+    _run_with(monkeypatch, [_native_init(), {"type": "result", **stop}])
     paths = _paths(tmp_path)
     spec = _spec(tmp_path, "code-review", path, base, head)
     meta = runner.run_one(spec, paths, "B")
@@ -286,7 +294,7 @@ def test_usage_limit_is_never_an_empty_review(tmp_path: Path, monkeypatch: pytes
 def test_api_error_status_names_the_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[3])
-    _run_with(monkeypatch, [_init_event(), {"type": "result", "is_error": True, "subtype": "success",
+    _run_with(monkeypatch, [_native_init(), {"type": "result", "is_error": True, "subtype": "success",
                                              "terminal_reason": "api_error", "result": "issue with the model"}])
     meta = runner.run_one(_spec(tmp_path, "code-review", path, base, head), _paths(tmp_path), "B")
     assert meta.status == "failed:api_error"
@@ -430,7 +438,7 @@ def test_board_cr_runs_code_review_then_the_board_with_its_findings(
     board = {**BOARD, "members": {**BOARD["members"], "ran": ["edge", "intern", "code-review"]}}
     started = _run_sessions(
         monkeypatch,
-        [_init_event(), _review_result(total_cost_usd=0.1, permission_denials=[{"tool_name": "Bash"}])],
+        [_native_init(), _review_result(total_cost_usd=0.1, permission_denials=[{"tool_name": "Bash"}])],
         [_init_event(), {**_board_result(board), "total_cost_usd": 1.5}],
     )
     paths = _paths(tmp_path)
@@ -468,7 +476,7 @@ def test_board_cr_without_review_findings_runs_the_board_with_an_empty_member(
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
     started = _run_sessions(
         monkeypatch,
-        [_init_event(), _review_result("No issues found.", total_cost_usd=0.05)],
+        [_native_init(), _review_result("No issues found.", total_cost_usd=0.05)],
         [_init_event(), {**_board_result(BOARD), "total_cost_usd": 1.5}],
     )
     paths = _paths(tmp_path)
@@ -487,7 +495,7 @@ def test_board_cr_failed_review_never_starts_the_board(tmp_path: Path, monkeypat
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
     failed = {"type": "result", "is_error": True, "subtype": "error_during_execution", "result": "boom"}
-    started = _run_sessions(monkeypatch, [_init_event(), failed])
+    started = _run_sessions(monkeypatch, [_native_init(), failed])
     paths = _paths(tmp_path)
     spec = _spec(tmp_path, "board-cr", path, base, head)
     meta = runner.run_one(spec, paths, "B")
@@ -505,16 +513,16 @@ def test_board_cr_usage_stop_in_either_session_redoes_both(
 ):
     path, base, head = repo
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    sessions = [[_init_event(), USAGE_LIMIT]]
+    sessions = [[_native_init(), USAGE_LIMIT]]
     if limited == "board":
-        sessions = [[_init_event(), _review_result()], [_init_event(), USAGE_LIMIT]]
+        sessions = [[_native_init(), _review_result()], [_init_event(), USAGE_LIMIT]]
     started = _run_sessions(monkeypatch, *sessions)
     paths = _paths(tmp_path)
     spec = _spec(tmp_path, "board-cr", path, base, head)
     assert runner.run_one(spec, paths, "B").status == "failed:usage-limit"
     assert len(started) == len(sessions) and not runner.is_done(paths, spec)
 
-    started = _run_sessions(monkeypatch, [_init_event(), _review_result()], [_init_event(), _board_result(BOARD)])
+    started = _run_sessions(monkeypatch, [_native_init(), _review_result()], [_init_event(), _board_result(BOARD)])
     assert runner.run_one(spec, paths, "B").status == "ok"
     assert len(started) == 2, "the retry redid both sessions"
 
@@ -551,7 +559,7 @@ def test_board_none_records_both_sessions_and_writes_no_cache(
     board = {**BOARD, "members": {"roster": "none", "ran": ["code-review"], "skipped": [], "failed": []}}
     started = _run_sessions(
         monkeypatch,
-        [_init_event(), _review_result(total_cost_usd=0.1)],
+        [_native_init(), _review_result(total_cost_usd=0.1)],
         [_init_event(), {**_board_result(board), "total_cost_usd": 0.2}],
     )
     paths = _paths(tmp_path)
@@ -607,3 +615,21 @@ def test_native_code_review_runs_without_the_board_plugin(tmp_path: Path):
     for variant in ("board-full", "board-none"):
         assert "--plugin-dir" in runner.command_for(review.model_copy(update={"variant": variant}), "claude")
 
+
+
+def test_a_session_without_the_board_must_load_no_plugin():
+    native = ExpectedSetup(version="2.1.317", model="claude-sonnet-5-5", tools=runner.TOOLS, plugin=None)
+    assert setup_problems(InitInfo.from_event(_native_init()), native) == []
+    problems = setup_problems(InitInfo.from_event(_init_event()), native)
+    assert any("plugins loaded" in p for p in problems) and any("board-review:review" in p for p in problems)
+
+
+def test_setup_check_matches_each_variant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo):
+    path, base, head = repo
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    native = _native_init()
+    _run_with(monkeypatch, [native, {"type": "result", "is_error": False, "subtype": "success", "result": "x"}])
+    assert runner.run_one(_spec(tmp_path, "code-review", path, base, head), _paths(tmp_path), "B").status == "ok"
+    _run_with(monkeypatch, [native, {"type": "result", "is_error": False, "subtype": "success", "result": "{}"}])
+    meta = runner.run_one(_spec(tmp_path, "board-full", path, base, head), _paths(tmp_path), "B")
+    assert meta.status == "failed:setup-mismatch" and "not loaded" in meta.detail
