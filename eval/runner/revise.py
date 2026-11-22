@@ -71,7 +71,10 @@ def neutral_findings(findings: list[dict[str, Any]]) -> str:
 
 def parse_report(text: str, ids: list[str]) -> tuple[dict[str, Any], str]:
     """The reviser's final JSON report, with one entry per finding id. Returns (report, repair)."""
-    report, repair = parse_board_json(text)
+    try:
+        report, repair = parse_board_json(text)
+    except ValueError:  # json.JSONDecodeError included
+        report, repair = _last_object(text), "last-object"
     entries = report.get("findings")
     if not isinstance(entries, list):
         raise ValueError("report has no findings list")
@@ -81,6 +84,22 @@ def parse_report(text: str, ids: list[str]) -> tuple[dict[str, Any], str]:
     if bad := [e["id"] for e in entries if e.get("action") not in ACTIONS or not isinstance(e.get("reason"), str)]:
         raise ValueError(f"report entries without an action in {ACTIONS} and a reason: {bad}")
     return report, repair
+
+
+def _last_object(text: str) -> dict[str, Any]:
+    """The last JSON object with a findings list in `text`. The reviser may write prose before its
+    report, and prose can hold braces (`${today}` in ghost-3, R1), so the first `{` isn't the start."""
+    decoder = json.JSONDecoder()
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text, i)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "findings" in obj:
+            return obj
+    raise ValueError("no JSON object with a findings list in the reply")
 
 
 def make_clone(repo: Path, base: str, head: str, dest: Path) -> None:

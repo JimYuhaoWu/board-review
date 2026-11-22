@@ -84,7 +84,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
 - **What it decides:** nothing. It sets the reviser prompt, which is frozen afterwards.
 - **Report:** the three inputs' bugs fixed and wrong edits per PR, and the decline table.
 
-- **Result (2026-11-22):** 143 of 144 runs `ok`, $11.47. Bugs fixed per PR: N1 2.10, C5 1.85, G 2.42; wrong edits per PR: N1 1.06, C5 0.60, G 0.02. C5 − N1, wrong edits: −0.46 (95% CI −0.96 to −0.04); C5's bugs fixed are 88% of N1's. Fix judge check: 39 of 40 (97.5%). The prompt is frozen unchanged. Report: `eval/reports/r1.md`.
+- **Result (2026-11-22):** 144 of 144 runs `ok` (one re-parsed after a parser fix), $11.59. Bugs fixed per PR: N1 2.10, C5 1.85, G 2.42; wrong edits per PR: N1 1.06, C5 0.60, G 0.02. C5 − N1, wrong edits: −0.46 (95% CI −0.96 to −0.04); C5's bugs fixed are 88% of N1's. Fix judge check: 39 of 40 (97.5%). The prompt is frozen unchanged. Report: `eval/reports/r1.md`.
 
 ### R2: test
 
@@ -99,7 +99,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
 ## 8. Cost
 
 - **Reviews:** none new; they come from Phases B and C.
-- **Reviser:** R1 cost $11.47 for 143 runs ($0.08 a run), so R2's 168 runs are about $14, on account B.
+- **Reviser:** R1 cost $11.59 for 144 runs ($0.08 a run), so R2's 168 runs are about $14, on account B.
 - **Judging:** about 3 bugs per PR per run, minus exact reverts. That is at most about 430 calls for R1, roughly half an hour at 15 a minute.
 
 ## 9. Decided and later
