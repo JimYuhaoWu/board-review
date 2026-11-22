@@ -864,3 +864,42 @@ def test_revise_files_are_written_with_lf(tmp_path, monkeypatch):
     for kind in ("revise-inputs", "revise-keys"):
         data = (tmp_path / "d" / kind / "p1" / "N1-r1.json").read_bytes()
         assert b"\r\n" not in data and data.endswith(b"}\n")
+
+
+# --- the review judge's blind check (judge_check) ---------------------------------------------
+
+def _jc_record(pid="p", rep=1):
+    golden = [{"comment": "Off by one in the loop (src/a.py:10-12)", "category": "bug"},
+              {"comment": "No location here", "category": "bug"}]
+    cands = [{"text": "`src/a.py:11`: the loop stops one early."}, {"text": "`src/b.py:3`: unrelated."},
+             {"text": "`src/a.py:40`: a different problem in the same file."}]
+    verdicts = [[{"match": True}, {"match": False}, {"match": False}],
+                [{"match": False}, {"match": False}, {"match": False}]]
+    return {"pr_id": pid, "repeat": rep, "golden": golden, "candidates": cands, "verdicts": verdicts}
+
+
+def test_judge_check_pools_matches_and_same_file_no_matches():
+    from eval.scoring import judge_check
+    match, near = judge_check.candidates([_jc_record()])
+    assert [(m[2], m[3]) for m in match] == [(0, 0)]
+    # only the same-file no-match; the other file and the comment with no location are left out
+    assert [(n[2], n[3]) for n in near] == [(0, 2)]
+
+
+def test_judge_check_sample_and_agreement(tmp_path):
+    import csv
+    from eval.scoring import judge_check
+    recs = [_jc_record(f"p{i}", 1) for i in range(4)]
+    out = tmp_path / "check.csv"
+    assert judge_check.sample(recs, 4, out, seed=1) == (4, 4, 4)
+    key = {r["pair"]: r["judge_match"] == "True" for r in csv.DictReader(open(out.with_name("check.key.csv"), encoding="utf-8"))}
+    assert sorted(key.values()) == [False, False, True, True]
+    rows = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    assert "judge_match" not in rows[0]
+    for r in rows:  # agree everywhere except pair 1
+        same = key[r["pair"]] if r["pair"] != "1" else not key[r["pair"]]
+        r["same issue (yes/no)"] = "yes" if same else "no"
+    with open(out, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+    a = judge_check.agreement(out)
+    assert (a["same"], a["answered"], a["differ"]) == (3, 4, [1])

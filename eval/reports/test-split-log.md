@@ -21,3 +21,18 @@
 | 2026-11-08 09:44 | qodo | test | judge | Gate 4 |
 | 2026-11-08 19:58 | qodo | test | gate4 | Gate 4 |
 | 2026-11-08 22:10 | qodo | test | preview (scratch) | PLAN v2 Phase A: re-scored Gate 3 and Gate 4 /code-review runs, new pairwise dedups |
+| 2026-11-20 23:01 | qodo | test | judge | PLAN v2 Phase C at medium: judging Y14's runs |
+| 2026-11-21 09:43 | martian | test | judge | PLAN v2 Phase C at medium: judging Y14's runs |
+| 2026-11-22 10:56 | martian | test | judge | PLAN v2 Phase C at medium: judging Y14's runs (resumed) |
+| 2026-11-22 14:23 | qodo | test | consensus-match | PLAN v2 Phase C at medium: the add-on's matching step on Y14's runs |
+| 2026-11-22 14:27 | martian | test | consensus-match | PLAN v2 Phase C at medium: the add-on's matching step on Y14's runs |
+| 2026-11-22 14:31 | qodo | test | consensus | PLAN v2 Phase C at medium: the decision |
+| 2026-11-22 14:31 | martian | test | consensus | PLAN v2 Phase C at medium: the decision |
+| 2026-11-22 14:31 | qodo | test | consensus | PLAN v2 Phase C at medium: per-dataset table |
+| 2026-11-22 14:31 | martian | test | consensus | PLAN v2 Phase C at medium: per-dataset table |
+| 2026-11-22 20:21 | qodo | test | revise-inputs | PLAN v3 R2: the reviser's findings files for the 28 Phase C Qodo PRs |
+| 2026-11-22 20:22 | qodo | test | judge-check | PLAN v2 Phase C: reproducing the judge-check sheet with the repo command |
+| 2026-11-22 20:23 | qodo | test | consensus | PLAN v2 Phase C at medium: tables for the report |
+| 2026-11-22 20:23 | martian | test | consensus | PLAN v2 Phase C at medium: tables for the report |
+| 2026-11-22 20:24 | qodo | test | consensus | PLAN v2 Phase C at medium: tables for the report |
+| 2026-11-22 20:24 | martian | test | consensus | PLAN v2 Phase C at medium: tables for the report |

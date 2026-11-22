@@ -1,6 +1,6 @@
 # Consensus review: plan v2
 
-Status: **approved 2026-11-08 (Jim); Phases A and B done (2026-11-18); Phase C reduced to `medium` (2026-11-19), next.** Changes come as pull requests.
+Status: **approved 2026-11-08 (Jim); Phases A and B done (2026-11-18); Phase C at `medium` done (2026-11-22): FAIL on recall. `low`, `high` and `xhigh` deferred.** Changes come as pull requests.
 
 [PLAN.md](PLAN.md) (v1) is the record of the board project, closed after Gate 4. Its fixed settings (5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
@@ -98,6 +98,7 @@ The preview's answer: all of n runs, n ≥ 3. After the preview, Jim dropped the
 - **Decision:** false positives per PR, add-on − native, paired bootstrap over PRs: the 95% CI must be below 0 (one mode, so no correction), and the add-on's recall at least 90% of the native runs' (point estimate). Both met: **PASS**; otherwise **FAIL**, reported as measured, with no tuning.
 - **Claim:** on PASS, "the add-on cuts false positives at `medium` on held-out PRs while keeping recall". Nothing about other modes.
 - **Judge check:** Jim's 60-pair blind check is required before the result is final (v1's rule; below 85% agreement, NOT DECIDED). Gate 4 skipped it; Phase C doesn't. The revision work does not wait for it.
+- **Result (2026-11-22): FAIL.** On the 58 PRs the add-on cuts false positives per PR from 4.90 to 1.84 (−3.06, 95% CI −3.47 to −2.67), but keeps 88.5% of one run's recall (63.4% against 71.6%; floor 90%). Qodo alone keeps 92%, Martian 85%. Judge check: 58 of 60 (96.7%). No re-selection on the test PRs: a different m or n is a new plan on new PRs. Report: `eval/reports/phase-c-medium.md`.
 
 ## 6. Cost
 
