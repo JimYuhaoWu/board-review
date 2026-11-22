@@ -216,3 +216,14 @@ def test_revise_needs_an_input_and_a_matching_findings_file(tmp_path: Path, caps
     assert "smoke/revise-G/smoke/r1 (to run)" in out and "HEAD~1..HEAD" in out
     cli.main([*common, "--input", "N1", "--findings-file", str(findings)])
     assert "findings file:" in capsys.readouterr().out
+
+
+def test_parse_report_skips_braces_in_prose_before_the_report():
+    """R1, ghost-3 C5 r2: the summary quoted `${today}`, and the first `{` started no JSON object."""
+    report = {"findings": [{"id": "F1", "action": "fixed", "reason": "restored `<${today}`"},
+                           {"id": "F2", "action": "declined", "reason": "not a bug"}]}
+    text = "I fixed F1: the filter is `created_at:<${today}` again. I declined F2." + chr(10) * 2 + json.dumps(report)
+    got, repair = revise.parse_report(text, ["F1", "F2"])
+    assert got == report and repair == "last-object"
+    with pytest.raises(ValueError):
+        revise.parse_report("Prose with {braces} and no report.", ["F1"])
