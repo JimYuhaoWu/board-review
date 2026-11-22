@@ -25,7 +25,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from . import consensus, revise, revision
+from . import consensus, judge_check, revise, revision
 from .hunks import load_injection
 from .board import label_stats, member_cards, member_stats, members_in, select_default
 from .gates import GATE1B_TOOLS
@@ -638,6 +638,27 @@ def cmd_revise_check(args) -> None:
               f"{r['pairs'] - r['answered']} unanswered.")
 
 
+def cmd_judge_check(args) -> None:
+    """PLAN v1 6: Jim's blind check of the review judge. `sample` writes the pairs; `score` compares."""
+    if args.action == "sample":
+        ids = pr_ids(args)
+        if args.prs:
+            wanted = args.prs.split(",")
+            if unknown := [x for x in wanted if x not in ids]:
+                sys.exit(f"not in the {args.split} split: {', '.join(unknown)}")
+            ids = wanted
+        records = load_records(args.dataset, args.judge, args.variant, ids)
+        n, pool_m, pool_n = judge_check.sample(records, args.n, Path(args.file))
+        print(f"{n} pairs in {args.file} from {len(records)} runs ({pool_m} match verdicts, {pool_n} same-file "
+              f"no-match verdicts); answer the last column yes or no. Don't open the .key.csv beside it.")
+    else:
+        r = judge_check.agreement(Path(args.file))
+        t = r["table"]
+        print(f"{r['same']} of {r['answered']} answered pairs agree ({r['agreement']:.1%}; needed 85%); "
+              f"{r['pairs'] - r['answered']} unanswered. Judge match: Jim yes {t[(True, True)]}, no {t[(True, False)]}; "
+              f"judge no match: Jim yes {t[(False, True)]}, no {t[(False, False)]}. Differ: {r['differ']}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m eval.scoring")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -764,6 +785,16 @@ def main() -> None:
             rs.add_argument("action", choices=["sample", "score"])
             rs.add_argument("--file", required=True, help="the CSV to write (sample) or Jim's answered CSV (score)")
             rs.add_argument("--n", type=int, default=40)
+    jc = sub.add_parser("judge-check", help="PLAN v1 6: Jim's blind check of the review judge")
+    jc.add_argument("action", choices=["sample", "score"])
+    jc.add_argument("--dataset", default="qodo")
+    jc.add_argument("--judge", required=True)
+    jc.add_argument("--split", choices=["dev", "test", "all"], default="dev")
+    jc.add_argument("--release", help="why test PRs are being touched; required for test or all (PLAN 6.6)")
+    jc.add_argument("--prs", help="comma-separated PR ids within the split; default every PR in it")
+    jc.add_argument("--variant", default="code-review")
+    jc.add_argument("--file", required=True, help="the CSV to write (sample) or Jim's answered CSV (score)")
+    jc.add_argument("--n", type=int, default=60)
     args = p.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the Windows console default can't print the tables
 
@@ -781,7 +812,8 @@ def main() -> None:
         {"report": cmd_report, "members": cmd_members, "subsets": cmd_subsets, "gate2": cmd_gate2,
          "gate3": cmd_gate3, "gate4": cmd_gate4, "consensus-match": cmd_consensus_match,
          "consensus": cmd_consensus, "revise-inputs": cmd_revise_inputs,
-         "revise-report": cmd_revise_report, "revise-check": cmd_revise_check}[args.cmd](args)
+         "revise-report": cmd_revise_report, "revise-check": cmd_revise_check,
+         "judge-check": cmd_judge_check}[args.cmd](args)
 
 
 if __name__ == "__main__":

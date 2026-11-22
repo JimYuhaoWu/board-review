@@ -1,6 +1,6 @@
 # Review, then revise: plan v3
 
-Status: **approved 2026-11-20 (Jim); R0 next.** Changes come as pull requests. Nothing runs before R0 is merged.
+Status: **approved 2026-11-20 (Jim); R0 and R1 done (2026-11-22); R2 next (Jim, 2026-11-22), with the prompt `53a4f25dfbce` frozen.** Changes come as pull requests.
 
 [PLAN-v2.md](PLAN-v2.md) is the review add-on: native `/code-review` run 5 times at `medium`, matched by one Sonnet call, issues kept only when all 5 runs found them. Its Phase C test at `medium` runs in parallel (TASKS Y14); this plan does not wait for it. v1's fixed settings (PLAN 5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
@@ -84,6 +84,8 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
 - **What it decides:** nothing. It sets the reviser prompt, which is frozen afterwards.
 - **Report:** the three inputs' bugs fixed and wrong edits per PR, and the decline table.
 
+- **Result (2026-11-22):** 143 of 144 runs `ok`, $11.47. Bugs fixed per PR: N1 2.10, C5 1.85, G 2.42; wrong edits per PR: N1 1.06, C5 0.60, G 0.02. C5 − N1, wrong edits: −0.46 (95% CI −0.96 to −0.04); C5's bugs fixed are 88% of N1's. Fix judge check: 39 of 40 (97.5%). The prompt is frozen unchanged. Report: `eval/reports/r1.md`.
+
 ### R2: test
 
 - **PRs:** the 28 Qodo PRs of Phase C. They have been used for review, never for revision. Their 5 native runs come from Y14, so no new review runs are needed.
@@ -97,7 +99,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
 ## 8. Cost
 
 - **Reviews:** none new; they come from Phases B and C.
-- **Reviser:** the cost is unknown until Y15's smoke test. An editing session at `medium` is guessed at $0.10–0.30. At that price R1 would cost about $15–45 and R2 about $17–50, both on account B.
+- **Reviser:** R1 cost $11.47 for 143 runs ($0.08 a run), so R2's 168 runs are about $14, on account B.
 - **Judging:** about 3 bugs per PR per run, minus exact reverts. That is at most about 430 calls for R1, roughly half an hour at 15 a minute.
 
 ## 9. Decided and later
