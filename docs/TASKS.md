@@ -1,5 +1,7 @@
 # Tasks
 
+**Closed 2026-11-23 (Jim).** No open tasks remain; the closing report is `eval/reports/final.md`.
+
 Who builds what, and the interfaces between the two sides, so both can work in parallel. Pick a task, open a branch named after its id (for example `y1-fetch`), and tick it here in your pull request.
 
 - **Account A side:** Jim, with Claude Code.
@@ -57,7 +59,7 @@ eval/results/<dataset>/revise-keys/<pr_id>/<input>-r<repeat>.json       (account
 | J1 | **The skill** (PLAN Phase 1): plugin, members, verifier, smoke test | ✅ first version, smoke-tested (see `eval/smoke/README.md`) |
 | J2 | **Scoring:** run Martian's extract, dedup, and judge steps unchanged; subset scoring (PLAN 6.2); metrics and the paired bootstrap. See `eval/scoring/README.md` | ✅ built and tested offline; reproduces Martian's published numbers. The live smoke check stopped at the endpoint quota, with the board's per-finding record still to judge |
 | J3 | **Judge gates:** Gate 1 with one paid published judge; Gate 1b for each local judge, including a repeat to test temperature-0 repeatability; a drift check at each judging session (re-judge a fixed sample of pairs), because the endpoint reports no model version. Pace calls for the shared endpoint (PLAN 5.1) | `gate1` (Sonnet 4.5 on OpenRouter) and `gate1b` with the repeat check built; Gate 1 **passed** 2026-11-03 (96.5% agreement, F1 40.1% vs 38.7%); Gate 1b for `deepseek-flash` **passed** 2026-11-04 (mean tau +0.97 vs floor +0.90; repeat check 200/200 same); Gate 1b for `glm-flash` **passed** 2026-11-05 (mean tau +0.97; repeat check 199/200 same); Gate 1b for `Qwen` **passed** 2026-11-06 (mean tau +0.97; repeat check 200/200 same) |
-| J4 | **Skill support for Phase 4b:** `model:` in member briefs, and `--verifier-model` | ☐, only if Y6 goes ahead |
+| J4 | **Skill support for Phase 4b:** `model:` in member briefs, and `--verifier-model` | dropped (project closed 2026-11-23) |
 | J6 | **Gate 3 support:** `--extra-findings` in the skill; `code_review_member_output` (a `/code-review` run as one `member_output`); `merge` and the per-issue views; `gate3` | ✅ 2026-11-06 |
 | J7 | **Gate 4 scoring:** views `board-none`, `board-default`, `code-review-b1` (B1's `/code-review` sessions judged alone); false positives per PR; `gate4` | ✅ 2026-11-07 |
 | J8 | **Gate 4 report**, with the format-slip normalization (#48) and the pipeline check | ✅ 2026-11-08: NO DECISION, the board project closes. Judge check not done (Jim) |

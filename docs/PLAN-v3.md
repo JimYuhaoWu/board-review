@@ -1,6 +1,6 @@
 # Review, then revise: plan v3
 
-Status: **approved 2026-11-20 (Jim); R0 and R1 done (2026-11-22); R2 done (2026-11-23): PASS, with C5's bugs fixed at 90.6% of N1's (floor 90%); fix judge check 37 of 40 (92.5%).** Changes come as pull requests.
+Status: **closed 2026-11-23 (Jim): the project ends here; see `eval/reports/final.md`. Approved 2026-11-20 (Jim); R0 and R1 done (2026-11-22); R2 done (2026-11-23): PASS, with C5's bugs fixed at 90.6% of N1's (floor 90%); fix judge check 37 of 40 (92.5%).** Changes come as pull requests.
 
 [PLAN-v2.md](PLAN-v2.md) is the review add-on: native `/code-review` run 5 times at `medium`, matched by one Sonnet call, issues kept only when all 5 runs found them. Its Phase C test at `medium` runs in parallel (TASKS Y14); this plan does not wait for it. v1's fixed settings (PLAN 5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
