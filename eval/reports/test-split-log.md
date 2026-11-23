@@ -36,3 +36,6 @@
 | 2026-11-22 20:23 | martian | test | consensus | PLAN v2 Phase C at medium: tables for the report |
 | 2026-11-22 20:24 | qodo | test | consensus | PLAN v2 Phase C at medium: tables for the report |
 | 2026-11-22 20:24 | martian | test | consensus | PLAN v2 Phase C at medium: tables for the report |
+| 2026-11-23 09:55 | qodo | test | revise-score | PLAN v3 R2: the fix judge on Y17's runs |
+| 2026-11-23 10:18 | qodo | test | revise-report | PLAN v3 R2: the verdict on Y17's runs |
+| 2026-11-23 10:18 | qodo | test | revise-check | PLAN v3 R2: Jim's 40-pair check of the fix judge |
