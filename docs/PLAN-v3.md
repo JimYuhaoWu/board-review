@@ -1,6 +1,6 @@
 # Review, then revise: plan v3
 
-Status: **approved 2026-11-20 (Jim); R0 and R1 done (2026-11-22); R2 done (2026-11-23): PASS, with C5's bugs fixed at 90.6% of N1's (floor 90%); its fix judge check is pending.** Changes come as pull requests.
+Status: **approved 2026-11-20 (Jim); R0 and R1 done (2026-11-22); R2 done (2026-11-23): PASS, with C5's bugs fixed at 90.6% of N1's (floor 90%); fix judge check 37 of 40 (92.5%).** Changes come as pull requests.
 
 [PLAN-v2.md](PLAN-v2.md) is the review add-on: native `/code-review` run 5 times at `medium`, matched by one Sonnet call, issues kept only when all 5 runs found them. Its Phase C test at `medium` runs in parallel (TASKS Y14); this plan does not wait for it. v1's fixed settings (PLAN 5.1), pipeline (6), usage limits (7) and way of working (9) still apply unless this plan changes them.
 
@@ -95,7 +95,7 @@ No new review runs are needed: Phase B has 5 native runs on all 24 Qodo developm
   - C5's planted bugs fixed per PR must be at least 90% of N1's (point estimate).
   - If both hold, the result is **PASS**; otherwise it is **FAIL**, reported as measured, with no tuning.
 - **Judge check:** the fix judge's blind check is repeated on 40 R2 pairs.
-- **Result (2026-11-23): PASS.** 168 of 168 runs `ok`, $14.79. Wrong edits per PR: C5 1.38, N1 1.89; C5 − N1: −0.52 (95% CI −1.04 to −0.11). Bugs fixed per PR: C5 1.89, N1 2.09, so 90.6% (106 of 117 bugs); one fewer C5 fix would have failed. G: 2.36 fixed, 0.38 wrong edits. Fix judge check pending. Report: `eval/reports/r2.md`.
+- **Result (2026-11-23): PASS.** 168 of 168 runs `ok`, $14.79. Wrong edits per PR: C5 1.38, N1 1.89; C5 − N1: −0.52 (95% CI −1.04 to −0.11). Bugs fixed per PR: C5 1.89, N1 2.09, so 90.6% (106 of 117 bugs); one fewer C5 fix would have failed. G: 2.36 fixed, 0.38 wrong edits. Fix judge check: 37 of 40 (92.5%); with Jim's three corrections applied, the ratio is 90.5%, still a PASS. Report: `eval/reports/r2.md`.
 
 ## 8. Cost
 
