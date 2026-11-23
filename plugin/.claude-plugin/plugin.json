@@ -1,8 +1,8 @@
 {
   "name": "board-review",
   "displayName": "Board Review",
-  "version": "0.1.0",
-  "description": "Code review by a board of independent specialist reviewers, with evidence-based CONFIRMED / PLAUSIBLE / REFUTED labels from separate verifiers.",
+  "version": "0.2.0",
+  "description": "Review then revise: 5 native /code-review runs, keep the issues all 5 found, fix or decline each (review-revise). Also a board of specialist reviewers (review).",
   "author": {
     "name": "JimYuhaoWu",
     "url": "https://github.com/JimYuhaoWu"

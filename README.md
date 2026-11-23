@@ -6,6 +6,18 @@ The repo also holds a reusable evaluation pipeline built on the [Martian Code Re
 
 **Status:** Phase 1 (building the skill). The default roster is still a hypothesis until the evaluation selects it. See [docs/PLAN.md](docs/PLAN.md) and [docs/SETUP.md](docs/SETUP.md).
 
+## Review and revise (recommended)
+
+The evaluation's result, packaged as the skill `review-revise`: 5 independent native `/code-review medium` runs, keep only the issues all 5 found, then a reviser fixes each kept issue or declines it with a reason, as uncommitted edits. Load the plugin (below), commit your work, and run:
+
+```
+/board-review:review-revise                 # the branch since it left its upstream or main
+/board-review:review-revise main..HEAD
+/board-review:review-revise --review-only   # the 5-of-5 issues, no edits
+```
+
+It takes 5–15 minutes and about $0.40 (API-equivalent) on your login, and needs Python 3.10+. Read `git diff` before committing: on the benchmark's test PRs a human was still left with about 1.4 wrong edits and 1.3 missed bugs per PR ([eval/reports/r2.md](eval/reports/r2.md)).
+
 ## Try it
 
 Load the plugin from a clone of this repo and start Claude Code in the repository you want reviewed:
