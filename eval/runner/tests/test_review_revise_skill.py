@@ -59,3 +59,21 @@ def test_report_parsing():
         raise AssertionError("a report missing a finding id must fail")
     except ValueError:
         pass
+
+
+def test_targets():
+    assert [rr._PR.match(t).group(1) or rr._PR.match(t).group(2) for t in
+            ("12", "#12", "https://github.com/o/r/pull/12", "https://github.com/o/r/pull/12/files")] == ["12"] * 4
+    assert not rr._PR.match("main..HEAD") and not rr._PR.match("v1.2")
+
+
+def test_range_runs_in_a_worktree_target(tmp_path):
+    import subprocess
+    g = lambda *a: subprocess.run(["git", "-C", str(tmp_path), *a], check=True, capture_output=True, text=True).stdout.strip()
+    g("init", "-q", "-b", "main")
+    g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base")
+    g("switch", "-q", "-c", "feature")
+    g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "change")
+    g("switch", "-q", "main")  # the reviewed range needn't be checked out
+    base, head, intent, label = rr.resolve_target(tmp_path, "main..feature")
+    assert (base, head) == (g("rev-parse", "main"), g("rev-parse", "feature")) and label == "main-feature"

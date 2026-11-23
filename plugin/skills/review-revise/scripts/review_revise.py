@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MODEL = "claude-sonnet-5-5"
@@ -84,33 +85,63 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
     return done.stdout.strip()
 
 
-def default_base(repo: Path) -> str:
+_PR = re.compile(r"^(?:#?(\d+)|https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)\S*)$")
+
+
+def gh_pr(repo: Path, number: int | None = None) -> dict | None:
+    """The GitHub PR (given, else the current branch's), or None without gh or a PR."""
+    exe = shutil.which("gh")
+    if not exe:
+        return None
+    done = subprocess.run([exe, "pr", "view", *([str(number)] if number else []),
+                           "--json", "number,title,body,baseRefName,state"],
+                          cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return json.loads(done.stdout) if done.returncode == 0 and done.stdout.strip() else None
+
+
+def fetched(repo: Path, ref: str) -> str:
+    git(repo, "fetch", "--quiet", "origin", ref)
+    return git(repo, "rev-parse", "FETCH_HEAD")
+
+
+def default_base(repo: Path, head: str) -> str:
     """The merge base of HEAD with its upstream, else with origin's default branch, main or master."""
     for ref in ("@{upstream}", "origin/HEAD", "origin/main", "origin/master", "main", "master"):
         if git(repo, "rev-parse", "--verify", "--quiet", ref, check=False):
-            base = git(repo, "merge-base", ref, "HEAD", check=False)
-            if base and base != git(repo, "rev-parse", "HEAD"):
+            base = git(repo, "merge-base", ref, head, check=False)
+            if base and base != head:
                 return base
-    raise SystemExit("no base found: pass the range to review, for example main..HEAD")
+    raise SystemExit("no base found: pass a PR number or a range such as main..HEAD")
 
 
-def resolve_range(repo: Path, target: str | None) -> tuple[str, str]:
-    """(base sha, HEAD sha). The range must end at HEAD, because the reviser edits the working tree."""
+def resolve_target(repo: Path, target: str | None) -> tuple[str, str, str, str]:
+    """(base sha, head sha, intent, label) for a PR number or URL, a range, or by default the
+    current branch (against its open PR's base when gh finds one)."""
+    m = _PR.match((target or "").strip())
+    if m:
+        n = int(m.group(1) or m.group(2))
+        pr = gh_pr(repo, n)
+        if not pr:
+            raise SystemExit(f"PR {n}: gh cannot read it (is gh installed and logged in, and is this its repository?)")
+        head = fetched(repo, f"pull/{n}/head")
+        base = git(repo, "merge-base", fetched(repo, pr["baseRefName"]), head)
+        return base, head, f"{pr['title']}\n\n{pr.get('body') or ''}".strip(), f"pr-{n}"
+    if target:
+        left, sep, right = target.partition("..")
+        if not sep:
+            raise SystemExit(f"{target!r} is neither a PR number nor a range such as main..HEAD")
+        head = git(repo, "rev-parse", right.lstrip(".") or "HEAD")
+        base = git(repo, "rev-parse", left)
+        if "..." in target:
+            base = git(repo, "merge-base", base, head)
+        return base, head, "", re.sub(r"[^\w-]+", "-", target).strip("-")[:40]
     head = git(repo, "rev-parse", "HEAD")
-    if not target:
-        return default_base(repo), head
-    left, sep, right = target.partition("..")
-    if not sep:
-        raise SystemExit(f"{target!r} is not a range; pass base..HEAD")
-    right = right.lstrip(".") or "HEAD"
-    if git(repo, "rev-parse", right) != head:
-        raise SystemExit(f"the range must end at HEAD ({head[:12]}), since the revision edits the working tree")
-    base = git(repo, "rev-parse", left)
-    return (git(repo, "merge-base", base, head) if "..." in target else base), head
-
-
-def tracked_changes(repo: Path) -> list[str]:
-    return [l for l in git(repo, "status", "--porcelain", "--untracked-files=no").splitlines() if l.strip()]
+    label = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    pr = gh_pr(repo)
+    if pr and pr.get("state") == "OPEN":
+        base = git(repo, "merge-base", fetched(repo, pr["baseRefName"]), head)
+        return base, head, f"{pr['title']}\n\n{pr.get('body') or ''}".strip(), f"pr-{pr['number']}"
+    return default_base(repo, head), head, "", label if label != "HEAD" else head[:12]
 
 
 # --- claude -p -----------------------------------------------------------------------------------
@@ -159,7 +190,6 @@ def session(prompt: str, cwd: Path, out: Path, tools: tuple, model: str, add_dir
 
 def ask(prompt: str, model: str) -> tuple[str, float]:
     """One tool-less `claude -p` call in an empty folder (the matching step)."""
-    import tempfile
     with tempfile.TemporaryDirectory() as cwd:
         done = subprocess.run([claude_exe(), "-p", "--model", model, "--effort", EFFORT, "--output-format", "json",
                                "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
@@ -272,8 +302,10 @@ def parse_report(text: str, ids: list[str]) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("range", nargs="?", help="the change to review, base..HEAD; default: the branch since it left its upstream or main")
-    p.add_argument("--intent", help="what the change is meant to do; default: the range's commit messages")
+    p.add_argument("target", nargs="?", help="a PR number or URL, or a range base..head; default: the current "
+                                             "branch, against its open PR's base (gh), else its upstream or main")
+    p.add_argument("--intent", help="what the change is meant to do; default: the PR's title and description, "
+                                    "else the commit messages")
     p.add_argument("--review-only", action="store_true", help="stop after the review: no edits")
     p.add_argument("--runs", type=int, default=RUNS, help=f"independent reviews (default {RUNS}, the measured setting)")
     p.add_argument("--model", default=MODEL, help=f"model of every session (default {MODEL}, the measured setting)")
@@ -282,24 +314,39 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
 
     repo = Path(git(a.repo, "rev-parse", "--show-toplevel"))
-    base, head = resolve_range(repo, a.range)
-    rng = f"{base[:12]}..{head[:12]}"
-    if not a.review_only and (dirty := tracked_changes(repo)):
-        raise SystemExit("commit or stash your changes first; the revision is left as uncommitted edits:\n" + "\n".join(dirty[:10]))
-    intent = a.intent or git(repo, "log", "--reverse", "--format=%s%n%n%b", f"{base}..{head}")
-    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
-    out = git_dir / "review-revise" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base, head, pr_intent, label = resolve_target(repo, a.target)
+    if base == head:
+        raise SystemExit("nothing to review: the change is empty")
+    intent = a.intent or pr_intent or git(repo, "log", "--reverse", "--format=%s%n%n%b", f"{base}..{head}")
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = Path(git(repo, "rev-parse", "--absolute-git-dir")) / "review-revise" / stamp
     out.mkdir(parents=True)
-    print(f"Reviewing {rng} with {a.runs} independent `/code-review {EFFORT}` sessions ({a.model}); output in {out}", flush=True)
+    # Everything runs in a temporary worktree at the change's head: the user's working tree, branch and
+    # uncommitted changes are never touched, and a PR needn't be checked out.
+    tmp = Path(tempfile.mkdtemp(prefix="review-revise-"))
+    wt = tmp / "repo"
+    git(repo, "worktree", "add", "--quiet", "--detach", str(wt), head)
+    print(f"Reviewing {label} ({base[:12]}..{head[:12]}) with {a.runs} independent `/code-review {EFFORT}` "
+          f"sessions ({a.model}); output in {out}", flush=True)
+    try:
+        summary = pipeline(a, repo, wt, out, base, head, intent, label, stamp)
+    finally:
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        shutil.rmtree(tmp, ignore_errors=True)
+    (out / "summary.md").write_text(summary, encoding="utf-8")
+    print("\n" + summary)
+    return 0
 
+
+def pipeline(a, repo: Path, wt: Path, out: Path, base: str, head: str, intent: str, label: str, stamp: str) -> str:
     review_prompt = f"/code-review {EFFORT} --max-findings all {base}..{head}" + (f"\n\n{intent}" if intent else "")
     cost = 0.0
 
     def review(k: int) -> dict:
         try:
-            return session(review_prompt, repo, out / f"review-{k}", REVIEW_TOOLS, a.model)
+            return session(review_prompt, wt, out / f"review-{k}", REVIEW_TOOLS, a.model)
         except RuntimeError:  # one retry, as a passing API error is the usual cause
-            return session(review_prompt, repo, out / f"review-{k}", REVIEW_TOOLS, a.model)
+            return session(review_prompt, wt, out / f"review-{k}", REVIEW_TOOLS, a.model)
 
     with concurrent.futures.ThreadPoolExecutor(a.runs) as pool:
         results = list(pool.map(review, range(1, a.runs + 1)))
@@ -338,38 +385,50 @@ def main(argv: list[str] | None = None) -> int:
     if intent:
         (inputs / "intent.txt").write_text(intent + "\n", encoding="utf-8", newline="\n")
 
-    lines = [f"# Review and revise: {rng}", "",
+    lines = [f"# Review and revise: {label} ({base[:12]}..{head[:12]})", "",
              f"{a.runs} reviews found {len(texts)} findings; **{len(kept)} issues were found by all {a.runs}** and kept.", ""]
-    for f in payload["findings"]:
-        lines.append(f"- **{f['id']}** {f['texts'][0]}")
+    lines += [f"- **{f['id']}** {f['texts'][0]}" for f in payload["findings"]]
 
     if kept and not a.review_only:
-        print(f"Revising {len(kept)} kept issues in the working tree", flush=True)
+        print(f"Revising {len(kept)} kept issues", flush=True)
         prompt = (REVISE_PROMPT.replace("<range>", f"{base}..HEAD")
                   .replace("<findings-file>", (inputs / "findings.json").as_posix())
                   .replace("<intent-line>\n", f"- The PR's title and description: {(inputs / 'intent.txt').as_posix()}\n" if intent else ""))
-        result = session(prompt, repo, out / "revise", REVISE_TOOLS, a.model, add_dir=inputs)
+        result = session(prompt, wt, out / "revise", REVISE_TOOLS, a.model, add_dir=inputs)
         cost += result.get("total_cost_usd", 0.0)
-        ids = [f["id"] for f in payload["findings"]]
-        lines += ["", "## Revision (uncommitted)", ""]
+        lines += ["", "## Revision", ""]
+        actions: list[dict] = []
         try:
-            report = parse_report(result.get("result") or "", ids)
+            report = parse_report(result.get("result") or "", [f["id"] for f in payload["findings"]])
             (out / "revise" / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-            for e in report["findings"]:
-                lines.append(f"- **{e['id']}** {e.get('action')}: {e.get('reason', '')}")
+            actions = report["findings"]
+            lines += [f"- **{e['id']}** {e.get('action')}: {e.get('reason', '')}" for e in actions]
         except ValueError as e:
             lines.append(f"The reviser's report could not be read ({e}); its reply is in {out / 'revise' / 'final.md'}.")
-        stat = git(repo, "diff", "--stat")
-        lines += ["", "```", stat or "(no edits)", "```", "",
-                  "Check `git diff` before committing: in the benchmark, about 1.4 edits per PR fixed nothing "
-                  "and about 1.3 planted bugs per PR were still left."]
+        git(wt, "add", "-A")
+        diff = git(wt, "diff", "--cached")
+        (out / "revision.diff").write_text(diff + "\n" if diff else "", encoding="utf-8", newline="\n")
+        if diff:
+            branch = f"review-revise/{label}-{stamp}"
+            who = [] if git(repo, "config", "user.email", check=False) else [
+                "-c", "user.name=review-revise", "-c", "user.email=review-revise@localhost"]
+            message = f"review-revise: fixes for {label}\n\n" + "\n".join(
+                f"{e['id']} {e.get('action')}: {e.get('reason', '')}" for e in actions)
+            git(wt, *who, "commit", "--quiet", "--no-verify", "-m", message)
+            git(wt, "branch", branch)
+            lines += ["", "```", git(wt, "show", "--stat", "--format=", "HEAD"), "```", "",
+                      f"The fixes are one commit on the new local branch `{branch}`, on top of {head[:12]}. "
+                      "Nothing was pushed, and your working tree wasn't touched.",
+                      f"- See them: `git show {branch}`",
+                      f"- Take them (on the reviewed branch): `git merge --ff-only {branch}`", "",
+                      "Check the diff before taking it: on the benchmark's test PRs, about 1.4 edits per PR fixed nothing "
+                      "and about 1.3 planted bugs per PR were still left."]
+        else:
+            lines += ["", "The reviser changed no files, so no branch was made."]
     elif kept:
         lines += ["", "Review only: nothing was edited."]
     lines += ["", f"Cost: ${cost:.2f} (API-equivalent). Sessions: {out}"]
-    summary = "\n".join(lines) + "\n"
-    (out / "summary.md").write_text(summary, encoding="utf-8")
-    print("\n" + summary)
-    return 0
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":

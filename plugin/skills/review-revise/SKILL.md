@@ -1,36 +1,33 @@
 ---
 name: review-revise
-description: Review a branch with 5 independent native /code-review runs, keep only the issues all 5 found, then fix each kept issue (or decline it with a reason) as uncommitted edits. Use when the user wants a low-noise review followed by automatic fixes, or asks for "review and revise".
-argument-hint: "[--review-only] [--intent text] [base..HEAD]"
-allowed-tools: Bash(python *) Bash(python3 *) Bash(py *) Bash(git diff *) Bash(git status *) Read
+description: Hands-off (man-free, unattended, automatic) review and revise of a PR or branch. 5 independent native /code-review runs, keep only the issues all 5 found, then fix or decline each one, with the fixes committed to a new local branch. Use when the user asks for a man-free, hands-off, unsupervised or automatic review and revise (or review and fix) of a PR, a branch or their changes.
+argument-hint: "[PR number or URL | base..head] [--review-only]"
+allowed-tools: Bash(python *) Bash(python3 *) Bash(py *) Bash(git show *) Bash(git log *) Read
 ---
 
-# Review, then revise
+# Hands-off review and revise
 
-This skill runs the pipeline measured in the board-review project (`eval/reports/final.md`):
-
-1. **Review:** `/code-review medium` in 5 independent `claude -p` sessions (read-only).
-2. **Match:** one call groups the findings that report the same defect. Only the issues **all 5** reviews found are kept, which cut false positives by about two thirds.
-3. **Revise:** one session fixes each kept issue with the smallest change, or declines it with a reason. The edits are left uncommitted.
+The user wants this done without supervising it, so **don't ask questions and don't stop for confirmation**. Run it, wait for it, and report.
 
 ## Run it
 
-1. Check that the working tree has no uncommitted changes to tracked files (`git status`), unless the user passed `--review-only`. If it does, ask the user to commit or stash them first. Don't do it yourself.
-2. Run the script from the repository, passing the user's arguments through unchanged:
+1. Pick the target from the user's words:
+   - A PR number or URL ("PR 123", "#123", a github.com/.../pull/123 link): pass it.
+   - A range ("main..HEAD"): pass it.
+   - "This PR", "this branch", "my changes", or nothing: pass nothing. The script then uses the current branch, against its open PR's base (via `gh`), or else its upstream or `main`.
+   - Add `--review-only` only if the user asks for a review without fixes.
+2. Run the script from the repository **in the background**, since it takes 5–15 minutes:
 
    ```
-   python "${CLAUDE_SKILL_DIR}/scripts/review_revise.py" $ARGUMENTS
+   python "${CLAUDE_SKILL_DIR}/scripts/review_revise.py" <target>
    ```
 
-   Use `python3` or `py` if `python` isn't found. The script needs Python 3.10+ and `claude` on PATH. It takes about 5–15 minutes, so run it with a timeout of at least 30 minutes, or in the background. Each run costs about $0.40 (API-equivalent) on the user's login.
-3. Show the user the summary the script prints: the kept issues, what was fixed or declined and why, and the `git diff --stat`.
-4. Tell the user to read `git diff` before committing. In the benchmark, even with this pipeline, about 1.4 edits per PR fixed nothing and about 1.3 planted bugs per PR were missed. Don't commit or revert anything yourself.
+   Use `python3` or `py` if `python` isn't found. It needs Python 3.10+, `claude` on PATH, and `gh` for PR numbers. Tell the user in one line that it's running, then wait for it to finish without polling.
+3. When it finishes, give the user the summary it printed: the kept issues, what was fixed or declined and why, and the branch holding the fixes. If it failed, show the error and the one thing that would fix it.
 
-## Options
+## What it does and doesn't touch
 
-- `base..HEAD`: the change to review. By default it is the branch since it left its upstream (or `main`/`master`). The range must end at `HEAD`.
-- `--review-only`: stop after the review, with no edits.
-- `--intent "..."`: what the change is meant to do. By default the range's commit messages are used.
-- `--runs`, `--model`: change the measured setting (5 runs, `claude-sonnet-5-5`). The results were measured only for the defaults.
-
-Every session's output is kept under `.git/review-revise/<time>/`: the reviews, the matching, the findings file and the reviser's report.
+- It works in a temporary git worktree at the change's head. The user's working tree, current branch and uncommitted changes are never touched, and a PR needn't be checked out.
+- The fixes become one commit on a new local branch, `review-revise/<target>-<time>`. Nothing is pushed or merged. **Don't push, merge or comment on the PR yourself** unless the user asks.
+- Remind the user, in one line, to read the fixes (`git show <branch>`) before taking them: on the benchmark's test PRs, about 1.4 edits per PR fixed nothing and about 1.3 planted bugs per PR were still left.
+- Every session's output is kept under `.git/review-revise/<time>/`. Each run costs about $0.40 (API-equivalent) on the user's login.
