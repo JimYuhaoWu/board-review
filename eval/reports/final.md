@@ -22,6 +22,10 @@ Human work left per PR after review and revision (R2, 28 Qodo test PRs, about 3.
 - **Better findings help less than expected.** The add-on removes about 0.5 wrong edits per PR, but costs about 5 review runs instead of 1 and misses a few more bugs. The gap from the add-on to perfect findings (2.63 to 1.17) is bigger than the gap from one run to the add-on.
 - **The reviser's own declines are a real filter.** It declines 51–67% of false findings and 5–8% of true ones, which is part of why the add-on's recall loss at review shrinks after revision.
 
+## Use it
+
+The measured pipeline is packaged as the skill `/board-review:review-revise` (README): 5 independent `/code-review medium` runs, the issues all 5 found, then the reviser, with the frozen prompts. Its edits are left uncommitted for a human to check.
+
 ## Limits
 
 - Qodo's planted bugs only, for revision; reviews at `/code-review medium` only, with `low`, `high` and `xhigh` untested.
