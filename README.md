@@ -4,7 +4,7 @@ A Claude Code skill for reviewing code after a long coding session. A board of s
 
 The repo also holds a reusable evaluation pipeline built on the [Martian Code Review Bench](https://github.com/withmartian/code-review-benchmark). It decides which members belong on the default board, and makes it cheap to test new members, including members for specific fields.
 
-**Status:** Phase 1 (building the skill). The default roster is still a hypothesis until the evaluation selects it. See [docs/PLAN.md](docs/PLAN.md) and [docs/SETUP.md](docs/SETUP.md).
+**Status:** closed 2026-11-23. The evaluation did not select a board over native `/code-review`; the findings, and what review followed by automated revision still leaves to a human, are in [eval/reports/final.md](eval/reports/final.md). Plans: [PLAN.md](docs/PLAN.md), [PLAN-v2.md](docs/PLAN-v2.md), [PLAN-v3.md](docs/PLAN-v3.md).
 
 ## Review and revise (recommended)
 
