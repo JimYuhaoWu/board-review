@@ -2,7 +2,7 @@
 name: review-revise
 description: Hands-off (man-free, unattended, automatic) review and revise of a PR or branch. 5 independent native /code-review runs, keep only the issues all 5 found, then fix or decline each one, with the fixes committed to a new local branch. Use when the user asks for a man-free, hands-off, unsupervised or automatic review and revise (or review and fix) of a PR, a branch or their changes.
 argument-hint: "[PR number or URL | base..head] [--review-only]"
-allowed-tools: Bash(python *) Bash(python3 *) Bash(py *) Bash(git show *) Bash(git log *) Read
+allowed-tools: Bash(python *) Bash(python3 *) Bash(py *) Bash(uv run *) Bash(git show *) Bash(git log *) Read
 ---
 
 # Hands-off review and revise
@@ -22,7 +22,7 @@ The user wants this done without supervising it, so **don't ask questions and do
    python "${CLAUDE_SKILL_DIR}/scripts/review_revise.py" <target>
    ```
 
-   Use `python3` or `py` if `python` isn't found. It needs Python 3.10+, `claude` on PATH, and `gh` for PR numbers. Tell the user in one line that it's running, then wait for it to finish without polling.
+   If `python` isn't found or isn't a real Python 3.10+ (on Windows it can be the Microsoft Store stub, which prints "Python was not found"), use `python3`, then `py -3`, then `uv run --no-project --python 3.12 "${CLAUDE_SKILL_DIR}/scripts/review_revise.py" <target>`. It also needs `git`, `claude` on PATH, and `gh` for PR numbers. Tell the user in one line that it's running, then wait for it to finish without polling.
 3. When it finishes, give the user the summary it printed: the kept issues, what was fixed or declined and why, and the branch holding the fixes. If it failed, show the error and the one thing that would fix it.
 
 ## What it does and doesn't touch

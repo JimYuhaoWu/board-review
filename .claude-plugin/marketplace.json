@@ -1,0 +1,16 @@
+{
+  "name": "board-review",
+  "owner": {
+    "name": "JimYuhaoWu",
+    "url": "https://github.com/JimYuhaoWu"
+  },
+  "description": "The board-review plugin: hands-off review and revise of a PR or branch.",
+  "plugins": [
+    {
+      "name": "board-review",
+      "source": "./plugin",
+      "version": "0.2.0",
+      "description": "Hands-off review and revise (review-revise): 5 native /code-review runs, keep the issues all 5 found, fix or decline each on a new local branch. Also the board of specialist reviewers (review)."
+    }
+  ]
+}
